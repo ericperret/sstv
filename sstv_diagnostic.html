@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SSTV Diagnostic Tool</title>
+    <style>
+        body {
+            font-family: 'Consolas', monospace;
+            background: #0a0a0f;
+            color: #00ff00;
+            padding: 20px;
+            margin: 0;
+        }
+        .container { max-width: 1400px; margin: 0 auto; }
+        h1 { color: #00ffff; text-align: center; }
+        .panel {
+            background: #0f0f18;
+            border: 1px solid #00ff00;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 15px 0;
+        }
+        .panel h3 { color: #00ffff; margin-top: 0; border-bottom: 1px solid #333; padding-bottom: 10px; }
+        canvas {
+            width: 100%;
+            background: #000;
+            border: 1px solid #333;
+            cursor: crosshair;
+        }
+        button, input[type="file"] {
+            background: #0a0a10;
+            border: 1px solid #00ff00;
+            color: #00ff00;
+            padding: 10px 15px;
+            margin: 5px;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+        button:hover { background: #00ff00; color: #000; }
+        .info { background: #001100; padding: 10px; border-radius: 4px; margin: 10px 0; font-size: 12px; }
+        .log { background: #000; padding: 10px; height: 200px; overflow-y: auto; font-size: 11px; border: 1px solid #333; }
+        .marker { color: #ff0; }
+        .error { color: #f44; }
+        .success { color: #4f4; }
+        table { width: 100%; border-collapse: collapse; }
+        td, th { border: 1px solid #333; padding: 5px; text-align: left; }
+        th { background: #001100; }
+        #cursor-info {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            background: rgba(0,0,0,0.9);
+            border: 1px solid #00ff00;
+            padding: 10px;
+            font-size: 12px;
+            z-index: 1000;
+        }
+        .zoom-controls { display: flex; gap: 10px; align-items: center; margin: 10px 0; }
+        input[type="range"] { flex: 1; accent-color: #00ff00; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>🔬 SSTV Diagnostic Tool</h1>
+    
+    <div class="panel">
+        <h3>1. Load WAV File</h3>
+        <input type="file" id="fileInput" accept=".wav">
+        <div id="fileInfo" class="info" style="display:none;"></div>
+    </div>
+    
+    <div class="panel">
+        <h3>2. Signal Analysis</h3>
+        <button onclick="analyzeSignal()">🔍 Analyze</button>
+        <button onclick="findVIS()">📡 Find VIS</button>
+        <button onclick="findSyncPulses()">⚡ Find Syncs</button>
+        <button onclick="measureLine()">📏 Measure Line</button>
+    </div>
+    
+    <div class="panel">
+        <h3>3. Frequency Plot (click to measure)</h3>
+        <div class="zoom-controls">
+            <span>Zoom:</span>
+            <input type="range" id="zoomRange" min="1" max="100" value="1" onchange="updateZoom()">
+            <span id="zoomLabel">1x</span>
+            <span>Offset:</span>
+            <input type="range" id="offsetRange" min="0" max="100" value="0" onchange="updateZoom()">
+        </div>
+        <canvas id="freqCanvas" height="200"></canvas>
+        <div id="cursor-info">
+            Time: --<br>
+            Freq: --<br>
+            Sample: --
+        </div>
+    </div>
+    
+    <div class="panel">
+        <h3>4. Detected Markers</h3>
+        <table id="markersTable">
+            <tr><th>Type</th><th>Time (ms)</th><th>Sample</th><th>Freq (Hz)</th><th>Duration</th></tr>
+        </table>
+    </div>
+    
+    <div class="panel">
+        <h3>5. Timing Analysis</h3>
+        <div id="timingAnalysis" class="info">Load a file and click Analyze</div>
+    </div>
+    
+    <div class="panel">
+        <h3>6. Log</h3>
+        <div id="logArea" class="log"></div>
+    </div>
+</div>
+
+<script>
+const SAMPLE_RATE = 44100;
+const FREQ = { SYNC: 1200, BLACK: 1500, WHITE: 2300, VIS_LEADER: 1900, VIS_BIT1: 1100, VIS_BIT0: 1300 };
+
+let audioData = null;
+let freqData = null;
+let markers = [];
+let zoomLevel = 1;
+let zoomOffset = 0;
+
+// Load WAV
+document.getElementById('fileInput').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    
+    log('Loading: ' + file.name);
+    const arrayBuffer = await file.arrayBuffer();
+    parseWAV(arrayBuffer);
+});
+
+function parseWAV(arrayBuffer) {
+    const view = new DataView(arrayBuffer);
+    let offset = 12;
+    let bitsPerSample = 16;
+    let sr = 44100;
+    
+    while (offset < arrayBuffer.byteLength - 8) {
+        const id = String.fromCharCode(view.getUint8(offset), view.getUint8(offset+1), view.getUint8(offset+2), view.getUint8(offset+3));
+        const size = view.getUint32(offset + 4, true);
+        
+        if (id === 'fmt ') {
+            sr = view.getUint32(offset + 12, true);
+            bitsPerSample = view.getUint16(offset + 22, true);
+        }
+        if (id === 'data') {
+            const samples = size / (bitsPerSample / 8);
+            audioData = new Float32Array(samples);
+            for (let i = 0; i < samples; i++) {
+                audioData[i] = view.getInt16(offset + 8 + i * 2, true) / 32768.0;
+            }
+            break;
+        }
+        offset += 8 + size;
+        if (size % 2) offset++;
+    }
+    
+    const duration = (audioData.length / sr).toFixed(2);
+    document.getElementById('fileInfo').style.display = 'block';
+    document.getElementById('fileInfo').innerHTML = `Sample Rate: ${sr}Hz | Duration: ${duration}s | Samples: ${audioData.length.toLocaleString()}`;
+    log(`Loaded: ${sr}Hz, ${duration}s, ${audioData.length} samples`, 'success');
+    
+    // Demodulate
+    log('Demodulating...');
+    freqData = demodulate(audioData);
+    log('Demodulation complete', 'success');
+    
+    drawFreqPlot();
+}
+
+function demodulate(samples) {
+    const n = samples.length;
+    const freqs = new Float32Array(n);
+    
+    let crossings = [];
+    let lastSign = samples[0] >= 0 ? 1 : -1;
+    
+    for (let i = 1; i < n; i++) {
+        const sign = samples[i] >= 0 ? 1 : -1;
+        if (sign !== lastSign) {
+            const frac = Math.abs(samples[i-1]) / (Math.abs(samples[i-1]) + Math.abs(samples[i]));
+            crossings.push(i - 1 + frac);
+            lastSign = sign;
+        }
+    }
+    
+    if (crossings.length < 2) { freqs.fill(1500); return freqs; }
+    
+    for (let i = 1; i < crossings.length; i++) {
+        const halfPeriod = crossings[i] - crossings[i-1];
+        const freq = SAMPLE_RATE / (halfPeriod * 2);
+        
+        if (freq >= 900 && freq <= 2600) {
+            const start = Math.floor(crossings[i-1]);
+            const end = Math.min(Math.floor(crossings[i]), n - 1);
+            for (let j = start; j <= end; j++) freqs[j] = freq;
+        }
+    }
+    
+    // Fill gaps
+    let last = 1500;
+    for (let i = 0; i < n; i++) {
+        if (freqs[i] === 0) freqs[i] = last;
+        else last = freqs[i];
+    }
+    
+    // Light smoothing
+    const out = new Float32Array(n);
+    let s = freqs[0];
+    for (let i = 0; i < n; i++) {
+        s = 0.7 * s + 0.3 * freqs[i];
+        out[i] = s;
+    }
+    
+    return out;
+}
+
+function drawFreqPlot() {
+    if (!freqData) return;
+    
+    const canvas = document.getElementById('freqCanvas');
+    const ctx = canvas.getContext('2d');
+    canvas.width = canvas.clientWidth;
+    const w = canvas.width, h = canvas.height;
+    
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, w, h);
+    
+    // Calculate view range
+    const totalSamples = freqData.length;
+    const viewSamples = Math.floor(totalSamples / zoomLevel);
+    const startSample = Math.floor(zoomOffset * (totalSamples - viewSamples));
+    const endSample = startSample + viewSamples;
+    
+    // Draw frequency guides
+    ctx.strokeStyle = '#222';
+    ctx.fillStyle = '#444';
+    ctx.font = '10px monospace';
+    for (const f of [1200, 1500, 1900, 2300]) {
+        const y = h - ((f - 1000) / 1500) * h;
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(w, y);
+        ctx.stroke();
+        ctx.fillText(f + 'Hz', 5, y - 2);
+    }
+    
+    // Draw frequency trace
+    ctx.strokeStyle = '#00ffff';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    
+    const step = Math.max(1, Math.floor(viewSamples / w));
+    for (let x = 0; x < w; x++) {
+        const sampleIdx = startSample + Math.floor(x * viewSamples / w);
+        if (sampleIdx >= freqData.length) break;
+        
+        const freq = freqData[sampleIdx];
+        const y = h - ((freq - 1000) / 1500) * h;
+        
+        if (x === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+    
+    // Draw markers
+    ctx.fillStyle = '#ff0';
+    for (const m of markers) {
+        if (m.sample >= startSample && m.sample <= endSample) {
+            const x = (m.sample - startSample) / viewSamples * w;
+            ctx.beginPath();
+            ctx.arc(x, 10, 5, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    }
+    
+    // Time axis
+    ctx.fillStyle = '#666';
+    const startMs = startSample / SAMPLE_RATE * 1000;
+    const endMs = endSample / SAMPLE_RATE * 1000;
+    const step_ms = Math.pow(10, Math.floor(Math.log10((endMs - startMs) / 5)));
+    for (let t = Math.ceil(startMs / step_ms) * step_ms; t < endMs; t += step_ms) {
+        const x = (t - startMs) / (endMs - startMs) * w;
+        ctx.fillText(t.toFixed(1) + 'ms', x, h - 5);
+    }
+}
+
+function updateZoom() {
+    zoomLevel = Math.pow(10, document.getElementById('zoomRange').value / 50);
+    zoomOffset = document.getElementById('offsetRange').value / 100;
+    document.getElementById('zoomLabel').textContent = zoomLevel.toFixed(1) + 'x';
+    drawFreqPlot();
+}
+
+// Mouse tracking
+document.getElementById('freqCanvas').addEventListener('mousemove', (e) => {
+    if (!freqData) return;
+    
+    const canvas = e.target;
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const w = canvas.width;
+    
+    const totalSamples = freqData.length;
+    const viewSamples = Math.floor(totalSamples / zoomLevel);
+    const startSample = Math.floor(zoomOffset * (totalSamples - viewSamples));
+    
+    const sample = Math.floor(startSample + (x / w) * viewSamples);
+    const time = sample / SAMPLE_RATE * 1000;
+    const freq = freqData[sample] || 0;
+    
+    document.getElementById('cursor-info').innerHTML = 
+        `Time: ${time.toFixed(2)}ms<br>Freq: ${freq.toFixed(0)}Hz<br>Sample: ${sample}`;
+});
+
+document.getElementById('freqCanvas').addEventListener('click', (e) => {
+    if (!freqData) return;
+    
+    const canvas = e.target;
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const w = canvas.width;
+    
+    const totalSamples = freqData.length;
+    const viewSamples = Math.floor(totalSamples / zoomLevel);
+    const startSample = Math.floor(zoomOffset * (totalSamples - viewSamples));
+    
+    const sample = Math.floor(startSample + (x / w) * viewSamples);
+    const time = sample / SAMPLE_RATE * 1000;
+    const freq = freqData[sample] || 0;
+    
+    addMarker('click', sample, freq);
+    log(`Marker at ${time.toFixed(2)}ms, ${freq.toFixed(0)}Hz, sample ${sample}`, 'marker');
+});
+
+function addMarker(type, sample, freq, duration = 0) {
+    markers.push({ type, sample, freq, duration });
+    updateMarkersTable();
+    drawFreqPlot();
+}
+
+function updateMarkersTable() {
+    const table = document.getElementById('markersTable');
+    table.innerHTML = '<tr><th>Type</th><th>Time (ms)</th><th>Sample</th><th>Freq (Hz)</th><th>Duration</th></tr>';
+    for (const m of markers) {
+        const time = (m.sample / SAMPLE_RATE * 1000).toFixed(2);
+        const dur = m.duration ? (m.duration / SAMPLE_RATE * 1000).toFixed(2) + 'ms' : '--';
+        table.innerHTML += `<tr><td>${m.type}</td><td>${time}</td><td>${m.sample}</td><td>${m.freq.toFixed(0)}</td><td>${dur}</td></tr>`;
+    }
+}
+
+function analyzeSignal() {
+    if (!freqData) { log('Load a file first', 'error'); return; }
+    
+    markers = [];
+    log('Analyzing signal...');
+    
+    // Find frequency distribution
+    const bins = {};
+    for (let i = 0; i < freqData.length; i++) {
+        const f = Math.round(freqData[i] / 50) * 50;
+        bins[f] = (bins[f] || 0) + 1;
+    }
+    
+    log('Frequency distribution:');
+    const sorted = Object.entries(bins).sort((a,b) => b[1] - a[1]).slice(0, 10);
+    for (const [f, count] of sorted) {
+        const pct = (count / freqData.length * 100).toFixed(1);
+        log(`  ${f}Hz: ${pct}%`);
+    }
+    
+    findVIS();
+    findSyncPulses();
+}
+
+function findVIS() {
+    if (!freqData) { log('Load a file first', 'error'); return; }
+    
+    log('Searching for VIS code...');
+    
+    const samplesPerMs = SAMPLE_RATE / 1000;
+    const windowSize = Math.floor(20 * samplesPerMs);
+    
+    // Find VIS leader (1900Hz)
+    let leaderStart = -1;
+    let leaderEnd = -1;
+    
+    for (let i = 0; i < Math.min(freqData.length, SAMPLE_RATE * 5); i += Math.floor(5 * samplesPerMs)) {
+        let sum = 0;
+        for (let j = 0; j < windowSize && i + j < freqData.length; j++) sum += freqData[i + j];
+        const avg = sum / windowSize;
+        
+        if (avg > 1850 && avg < 1950) {
+            if (leaderStart < 0) leaderStart = i;
+            leaderEnd = i;
+        } else if (leaderStart > 0 && i > leaderEnd + 50 * samplesPerMs) {
+            break; // End of leader region
+        }
+    }
+    
+    if (leaderStart < 0) {
+        log('No VIS leader found!', 'error');
+        return null;
+    }
+    
+    const leaderMs = (leaderEnd - leaderStart) / samplesPerMs;
+    log(`VIS leader: ${(leaderStart/samplesPerMs).toFixed(1)}ms - ${(leaderEnd/samplesPerMs).toFixed(1)}ms (${leaderMs.toFixed(0)}ms duration)`, 'success');
+    addMarker('VIS_LEADER', leaderStart, 1900, leaderEnd - leaderStart);
+    
+    // Expected: Leader(300) + Break(10) + Leader(300) + Bits(8*30=240) + Parity(30) + Stop(30) = 910ms
+    // But we look for bits starting at leader + 620ms
+    
+    const bitsStart = leaderStart + Math.floor(620 * samplesPerMs);
+    const bitDuration = Math.floor(30 * samplesPerMs);
+    
+    log('Reading VIS bits:');
+    let visCode = 0;
+    for (let bit = 0; bit < 8; bit++) {
+        const bitCenter = bitsStart + bit * bitDuration + bitDuration / 2;
+        
+        let sum = 0;
+        const win = Math.floor(10 * samplesPerMs);
+        for (let j = 0; j < win; j++) {
+            const idx = bitCenter - win/2 + j;
+            if (idx >= 0 && idx < freqData.length) sum += freqData[idx];
+        }
+        const avgFreq = sum / win;
+        
+        const bitVal = avgFreq < 1200 ? 1 : 0;
+        visCode |= (bitVal << bit);
+        
+        log(`  Bit ${bit}: ${avgFreq.toFixed(0)}Hz -> ${bitVal}`);
+        addMarker(`BIT_${bit}`, bitCenter, avgFreq);
+    }
+    
+    log(`VIS Code: 0x${visCode.toString(16).toUpperCase()} (${visCode})`, 'success');
+    
+    // Decode mode
+    const modes = {
+        0x08: 'Robot36', 0x0C: 'Robot72',
+        0x2C: 'Martin M1', 0x28: 'Martin M2',
+        0x3C: 'Scottie S1', 0x38: 'Scottie S2',
+        0x5F: 'PD120', 0x60: 'PD180', 0x63: 'PD90', 0x61: 'PD240'
+    };
+    const modeName = modes[visCode] || 'UNKNOWN';
+    log(`Mode: ${modeName}`, modeName === 'UNKNOWN' ? 'error' : 'success');
+    
+    // Image start
+    const imageStart = bitsStart + 10 * bitDuration; // 8 data + parity + stop
+    log(`Image starts at: ${(imageStart/samplesPerMs).toFixed(2)}ms (sample ${imageStart})`, 'marker');
+    addMarker('IMAGE_START', imageStart, freqData[imageStart] || 1500);
+    
+    return { visCode, imageStart, leaderStart };
+}
+
+function findSyncPulses() {
+    if (!freqData) { log('Load a file first', 'error'); return; }
+    
+    log('Searching for sync pulses (1200Hz)...');
+    
+    const samplesPerMs = SAMPLE_RATE / 1000;
+    const minSyncMs = 4; // Minimum sync duration
+    const maxSyncMs = 25; // Maximum sync duration
+    
+    const syncs = [];
+    let inSync = false;
+    let syncStart = 0;
+    
+    for (let i = 0; i < freqData.length; i += Math.floor(1 * samplesPerMs)) {
+        const freq = freqData[i];
+        
+        if (freq > 1100 && freq < 1300) {
+            if (!inSync) {
+                syncStart = i;
+                inSync = true;
+            }
+        } else {
+            if (inSync) {
+                const duration = (i - syncStart) / samplesPerMs;
+                if (duration >= minSyncMs && duration <= maxSyncMs) {
+                    syncs.push({ start: syncStart, end: i, duration });
+                }
+                inSync = false;
+            }
+        }
+    }
+    
+    log(`Found ${syncs.length} sync pulses`);
+    
+    // Show first 20
+    for (let i = 0; i < Math.min(20, syncs.length); i++) {
+        const s = syncs[i];
+        log(`  Sync ${i}: ${(s.start/samplesPerMs).toFixed(2)}ms, duration ${s.duration.toFixed(2)}ms`);
+        if (i < 5) addMarker(`SYNC_${i}`, s.start, 1200, s.end - s.start);
+    }
+    
+    // Calculate line timing
+    if (syncs.length >= 3) {
+        const intervals = [];
+        for (let i = 1; i < Math.min(50, syncs.length); i++) {
+            intervals.push((syncs[i].start - syncs[i-1].start) / samplesPerMs);
+        }
+        
+        const avgInterval = intervals.reduce((a,b) => a+b, 0) / intervals.length;
+        const variance = intervals.map(x => (x - avgInterval) ** 2).reduce((a,b) => a+b, 0) / intervals.length;
+        const stdDev = Math.sqrt(variance);
+        
+        log(`Average sync interval: ${avgInterval.toFixed(3)}ms (stddev: ${stdDev.toFixed(3)}ms)`, 'success');
+        
+        document.getElementById('timingAnalysis').innerHTML = `
+            <strong>Timing Analysis:</strong><br>
+            Sync pulses found: ${syncs.length}<br>
+            Average line duration: ${avgInterval.toFixed(3)}ms<br>
+            Standard deviation: ${stdDev.toFixed(3)}ms<br>
+            <br>
+            <strong>Expected timings:</strong><br>
+            Robot36: 150.0ms (9+3+88+4.5+1.5+44)<br>
+            Robot72: 225.0ms (9+3+138+4.5+1.5+69)<br>
+            Martin M1: 446.446ms<br>
+            Scottie S1: 428.22ms<br>
+            PD120: 508.48ms per pair<br>
+            <br>
+            <strong>Deviation from Robot36:</strong> ${(avgInterval - 150).toFixed(3)}ms<br>
+            <strong>Deviation from Robot72:</strong> ${(avgInterval - 225).toFixed(3)}ms
+        `;
+    }
+    
+    return syncs;
+}
+
+function measureLine() {
+    if (markers.length < 2) {
+        log('Click on plot to add at least 2 markers first', 'error');
+        return;
+    }
+    
+    const last2 = markers.slice(-2);
+    const diff = Math.abs(last2[1].sample - last2[0].sample);
+    const diffMs = diff / SAMPLE_RATE * 1000;
+    
+    log(`Distance between last 2 markers: ${diffMs.toFixed(3)}ms (${diff} samples)`, 'success');
+}
+
+function log(msg, type = '') {
+    const logArea = document.getElementById('logArea');
+    const time = new Date().toISOString().substr(11, 8);
+    const cls = type ? ` class="${type}"` : '';
+    logArea.innerHTML += `<div${cls}>[${time}] ${msg}</div>`;
+    logArea.scrollTop = logArea.scrollHeight;
+    console.log(msg);
+}
+</script>
+</body>
+</html>
