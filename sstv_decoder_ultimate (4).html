@@ -1,0 +1,2336 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Décodeur SSTV Pro - PLL + AFC</title>
+    <style>
+        body {
+            font-family: 'Consolas', 'Monaco', monospace;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #0a0a0f;
+            color: #00ff00;
+        }
+        .container {
+            background-color: #0f0f18;
+            padding: 30px;
+            border-radius: 10px;
+            border: 1px solid #00ff00;
+        }
+        h1 {
+            color: #00ffff;
+            text-align: center;
+            text-shadow: 0 0 10px #00ffff;
+        }
+        .subtitle {
+            text-align: center;
+            color: #888;
+            margin-bottom: 20px;
+        }
+        .control-group {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #333;
+            border-radius: 8px;
+            background-color: #0a0a10;
+        }
+        .control-group h3 {
+            color: #00ffff;
+            margin-top: 0;
+            border-bottom: 1px solid #333;
+            padding-bottom: 10px;
+        }
+        input[type="file"], select, button {
+            margin: 5px;
+            padding: 10px 15px;
+            border-radius: 4px;
+            border: 1px solid #00ff00;
+            background-color: #0a0a10;
+            color: #00ff00;
+            font-family: inherit;
+        }
+        button {
+            cursor: pointer;
+            font-weight: bold;
+            transition: all 0.3s;
+        }
+        button:hover {
+            background-color: #00ff00;
+            color: #000;
+        }
+        button:disabled {
+            border-color: #333;
+            color: #333;
+            cursor: not-allowed;
+        }
+        button:disabled:hover {
+            background-color: #0a0a10;
+            color: #333;
+        }
+        #canvas {
+            border: 2px solid #00ff00;
+            display: block;
+            margin: 20px auto;
+            background-color: #000;
+            box-shadow: 0 0 20px rgba(0, 255, 0, 0.3);
+        }
+        .progress-bar {
+            width: 100%;
+            height: 24px;
+            background-color: #111;
+            border-radius: 12px;
+            overflow: hidden;
+            margin: 10px 0;
+            border: 1px solid #333;
+        }
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #00ff00, #00ffff);
+            width: 0%;
+            transition: width 0.1s;
+        }
+        .info {
+            background-color: #001100;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 10px 0;
+            border-left: 4px solid #00ff00;
+        }
+        .warning {
+            background-color: #111100;
+            border-left-color: #ffff00;
+        }
+        .error {
+            background-color: #110000;
+            color: #ff4444;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 10px 0;
+            border-left: 4px solid #ff4444;
+        }
+        .debug {
+            background-color: #000;
+            color: #00ff00;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+            font-size: 11px;
+            max-height: 300px;
+            overflow-y: auto;
+            border: 1px solid #333;
+        }
+        .spectrum-canvas {
+            width: 100%;
+            height: 150px;
+            background-color: #000;
+            border: 1px solid #333;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        label {
+            display: inline-block;
+            width: 200px;
+            color: #aaa;
+        }
+        .detected-mode {
+            font-size: 18px;
+            color: #00ffff;
+            font-weight: bold;
+        }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            margin: 10px 0;
+        }
+        .stat-box {
+            background: #001100;
+            padding: 10px;
+            border-radius: 5px;
+            text-align: center;
+            border: 1px solid #333;
+        }
+        .stat-value {
+            font-size: 24px;
+            color: #00ffff;
+        }
+        .stat-label {
+            font-size: 11px;
+            color: #666;
+        }
+        .row {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        input[type="range"] {
+            width: 200px;
+            accent-color: #00ff00;
+        }
+        input[type="number"] {
+            width: 80px;
+            background: #0a0a10;
+            border: 1px solid #333;
+            color: #00ff00;
+            padding: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📡 SSTV Decoder Ultimate</h1>
+        <p class="subtitle">PLL + AFC + Doppler — WAV File & Live Audio</p>
+        
+        <!-- TABS -->
+        <div class="tabs" style="display:flex;gap:5px;margin-bottom:15px;">
+            <button class="tab-btn active" onclick="switchTab('file')" id="tabFile" style="padding:10px 25px;background:#0f0f18;border:2px solid #00ff00;color:#00ff00;cursor:pointer;border-radius:5px 5px 0 0;font-weight:bold;">📁 WAV File</button>
+            <button class="tab-btn" onclick="switchTab('live')" id="tabLive" style="padding:10px 25px;background:#0a0a10;border:2px solid #333;color:#888;cursor:pointer;border-radius:5px 5px 0 0;font-weight:bold;">🎤 Live Audio</button>
+        </div>
+        
+        <!-- FILE TAB -->
+        <div id="fileTabContent" class="tab-content" style="display:block;">
+        
+        <div class="control-group">
+            <h3>1. Charger un fichier WAV</h3>
+            <input type="file" id="fileInput" accept=".wav,audio/wav">
+            <div id="fileInfo" class="info" style="display:none;"></div>
+        </div>
+        
+        <div class="control-group">
+            <h3>2. Configuration</h3>
+            <div class="row" style="margin-bottom:15px;">
+                <div>
+                    <label>Mode forcé:</label>
+                    <select id="forceMode">
+                        <option value="auto">Auto-détection (VIS)</option>
+                        <optgroup label="Robot">
+                            <option value="robot36">Robot36 Color</option>
+                            <option value="robot72">Robot72 Color</option>
+                        </optgroup>
+                        <optgroup label="Martin">
+                            <option value="martinM1">Martin M1</option>
+                            <option value="martinM2">Martin M2</option>
+                        </optgroup>
+                        <optgroup label="Scottie">
+                            <option value="scottieS1">Scottie S1</option>
+                            <option value="scottieS2">Scottie S2</option>
+                        </optgroup>
+                        <optgroup label="PD">
+                            <option value="pd90">PD90</option>
+                            <option value="pd120">PD120</option>
+                            <option value="pd160">PD160</option>
+                            <option value="pd180">PD180</option>
+                            <option value="pd240">PD240</option>
+                        </optgroup>
+                    </select>
+                </div>
+            </div>
+            <div class="row" style="margin-bottom:15px;">
+                <div>
+                    <label>Décalage Doppler manuel (Hz):</label>
+                    <input type="number" id="dopplerOffset" value="0" min="-500" max="500">
+                </div>
+                <div>
+                    <label>AFC (Auto Freq Control):</label>
+                    <select id="afcMode">
+                        <option value="auto">Auto (sync pulse)</option>
+                        <option value="off">Désactivé</option>
+                    </select>
+                </div>
+            </div>
+            <div class="row">
+                <div>
+                    <label>Slant correction (ms/ligne):</label>
+                    <input type="number" id="slantCorrection" value="0" step="0.01" min="-1" max="1">
+                </div>
+            </div>
+        </div>
+        
+        <div class="control-group">
+            <h3>3. Décodage</h3>
+            <button id="analyzeBtn" disabled>📊 Analyser signal</button>
+            <button id="decodeBtn" disabled>🔍 Décoder</button>
+            <button id="saveBtn" disabled style="border-color:#00ffff;color:#00ffff;">💾 Sauvegarder PNG</button>
+            <div class="progress-bar" id="progressBar" style="display:none;">
+                <div class="progress-fill" id="progressFill"></div>
+            </div>
+            <div id="status" class="info" style="display:none;"></div>
+        </div>
+        
+        <div class="control-group">
+            <h3>4. Analyse du signal</h3>
+            <div class="stats">
+                <div class="stat-box">
+                    <div class="stat-value" id="statDoppler">--</div>
+                    <div class="stat-label">Doppler estimé (Hz)</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-value" id="statSNR">--</div>
+                    <div class="stat-label">SNR estimé (dB)</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-value" id="statMode">--</div>
+                    <div class="stat-label">Mode détecté</div>
+                </div>
+            </div>
+            <canvas id="waveformCanvas" class="spectrum-canvas" width="1000" height="100"></canvas>
+            <canvas id="spectrogramCanvas" class="spectrum-canvas" width="1000" height="150"></canvas>
+        </div>
+        
+        <div class="control-group">
+            <h3>5. Image décodée</h3>
+            <canvas id="canvas" width="640" height="496"></canvas>
+        </div>
+        
+        <div class="control-group">
+            <h3>6. Debug</h3>
+            <div id="debugLog" class="debug"></div>
+        </div>
+        
+        </div><!-- END FILE TAB -->
+        
+        <!-- LIVE TAB -->
+        <div id="liveTabContent" class="tab-content" style="display:none;">
+        
+        <div class="control-group">
+            <h3>🎤 Audio Capture</h3>
+            <div style="display:flex;justify-content:center;gap:15px;margin-bottom:15px;">
+                <button id="startLiveBtn" style="padding:15px 30px;font-size:16px;">▶ START</button>
+                <button id="stopLiveBtn" disabled style="padding:15px 30px;font-size:16px;border-color:#ff4444;color:#ff4444;">■ STOP</button>
+            </div>
+            <div style="background:#111;border:1px solid #333;border-radius:4px;height:24px;overflow:hidden;margin:10px 0;">
+                <div id="levelMeter" style="height:100%;background:linear-gradient(90deg,#00ff00,#ffff00,#ff0000);width:0%;transition:width 0.1s;"></div>
+            </div>
+            <div id="liveSourceName" style="font-size:12px;color:#666;text-align:center;">-- Cliquez START pour commencer --</div>
+        </div>
+        
+        <div class="control-group">
+            <h3>📊 Signal Live</h3>
+            <div style="text-align:center;padding:15px;">
+                <div style="font-size:42px;color:#00ffff;font-weight:bold;font-family:monospace;" id="liveFreqDisplay">---- Hz</div>
+            </div>
+            <div class="stats">
+                <div class="stat-box">
+                    <div class="stat-value" id="liveStatState">IDLE</div>
+                    <div class="stat-label">État</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-value" id="liveStatLine">--</div>
+                    <div class="stat-label">Ligne</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-value" id="liveStatMode">--</div>
+                    <div class="stat-label">Mode</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="control-group">
+            <h3>⚙️ Configuration Live</h3>
+            <div class="row" style="margin-bottom:15px;">
+                <div>
+                    <label>Mode forcé:</label>
+                    <select id="liveForceMode">
+                        <option value="auto">Auto-détection (VIS)</option>
+                        <optgroup label="Robot">
+                            <option value="robot36">Robot36</option>
+                            <option value="robot72">Robot72</option>
+                        </optgroup>
+                        <optgroup label="Martin">
+                            <option value="martinM1">Martin M1</option>
+                            <option value="martinM2">Martin M2</option>
+                        </optgroup>
+                        <optgroup label="Scottie">
+                            <option value="scottieS1">Scottie S1</option>
+                            <option value="scottieS2">Scottie S2</option>
+                        </optgroup>
+                        <optgroup label="PD">
+                            <option value="pd90">PD90</option>
+                            <option value="pd120">PD120</option>
+                            <option value="pd180">PD180</option>
+                            <option value="pd240">PD240</option>
+                        </optgroup>
+                    </select>
+                </div>
+                <div>
+                    <label>Doppler manuel (Hz):</label>
+                    <input type="number" id="liveDopplerOffset" value="0" min="-500" max="500">
+                </div>
+            </div>
+        </div>
+        
+        <div class="control-group">
+            <h3>🖼️ Image Live</h3>
+            <canvas id="liveCanvas" width="640" height="496" style="border:2px solid #00ff00;display:block;margin:10px auto;background:#000;box-shadow:0 0 20px rgba(0,255,0,0.3);"></canvas>
+            <div class="progress-bar">
+                <div class="progress-fill" id="liveProgressFill"></div>
+            </div>
+            <div style="text-align:center;margin-top:10px;">
+                <button id="liveSaveBtn" disabled style="border-color:#00ffff;color:#00ffff;">💾 Sauvegarder PNG</button>
+                <button id="liveClearBtn">🗑️ Effacer</button>
+            </div>
+        </div>
+        
+        <div class="control-group">
+            <h3>📝 Log Live</h3>
+            <div id="liveDebugLog" class="debug"></div>
+        </div>
+        
+        </div><!-- END LIVE TAB -->
+        
+        <div id="error" class="error" style="display:none;"></div>
+    </div>
+
+    <script>
+    // ==========================================================================
+    // MODE DEFINITIONS (EXACT SPECS)
+    // ==========================================================================
+    
+    const SSTV_MODES = {
+        robot36: {
+            name: "Robot36",
+            visCode: 0x08,
+            width: 320, height: 240,
+            scanMs: 88, chromaMs: 44,
+            syncMs: 9, porchMs: 3,
+            separatorMs: 4.5, chromaPorchMs: 1.5,
+            lineSequence: "robot"
+        },
+        robot72: {
+            name: "Robot72",
+            visCode: 0x0C,
+            width: 320, height: 240,
+            scanMs: 138, chromaMs: 69,
+            syncMs: 9, porchMs: 3,
+            separatorMs: 4.5, chromaPorchMs: 1.5,
+            lineSequence: "robot"
+        },
+        martinM1: {
+            name: "Martin M1",
+            visCode: 0x2C,
+            width: 320, height: 256,
+            scanMs: 146.432,
+            syncMs: 4.862, porchMs: 0.572, separatorMs: 0.572,
+            lineSequence: "martin"
+        },
+        martinM2: {
+            name: "Martin M2",
+            visCode: 0x28,
+            width: 320, height: 256,
+            scanMs: 73.216,
+            syncMs: 4.862, porchMs: 0.572, separatorMs: 0.572,
+            lineSequence: "martin"
+        },
+        scottieS1: {
+            name: "Scottie S1",
+            visCode: 0x3C,
+            width: 320, height: 256,
+            scanMs: 138.240,
+            syncMs: 9.0, porchMs: 1.5, separatorMs: 1.5,
+            lineSequence: "scottie"
+        },
+        scottieS2: {
+            name: "Scottie S2",
+            visCode: 0x38,
+            width: 320, height: 256,
+            scanMs: 88.064,
+            syncMs: 9.0, porchMs: 1.5, separatorMs: 1.5,
+            lineSequence: "scottie"
+        },
+        pd90: {
+            name: "PD90",
+            visCode: 0x63,
+            width: 320, height: 256,
+            scanMs: 170.240,
+            syncMs: 20.0, porchMs: 2.08,
+            lineSequence: "pd"
+        },
+        pd120: {
+            name: "PD120",
+            visCode: 0x5F,
+            width: 640, height: 496,
+            scanMs: 121.6,
+            syncMs: 20.0, porchMs: 2.08,
+            lineSequence: "pd"
+        },
+        pd160: {
+            name: "PD160",
+            visCode: 0x62,
+            width: 512, height: 400,
+            scanMs: 195.584,
+            syncMs: 20.0, porchMs: 2.08,
+            lineSequence: "pd"
+        },
+        pd180: {
+            name: "PD180",
+            visCode: 0x60,
+            width: 640, height: 496,
+            scanMs: 183.04,
+            syncMs: 20.0, porchMs: 2.08,
+            lineSequence: "pd"
+        },
+        pd240: {
+            name: "PD240",
+            visCode: 0x61,
+            width: 640, height: 496,
+            scanMs: 244.48,
+            syncMs: 20.0, porchMs: 2.08,
+            lineSequence: "pd"
+        }
+    };
+    
+    // VIS code mapping
+    const VIS_TO_MODE = {};
+    for (const [key, mode] of Object.entries(SSTV_MODES)) {
+        VIS_TO_MODE[mode.visCode] = key;
+    }
+    
+    // SSTV frequency constants
+    const FREQ = {
+        SYNC: 1200,
+        BLACK: 1500,
+        WHITE: 2300,
+        RANGE: 800,  // WHITE - BLACK
+        VIS_LEADER: 1900,
+        VIS_BREAK: 1200,
+        VIS_ONE: 1100,
+        VIS_ZERO: 1300
+    };
+    
+    // ==========================================================================
+    // GLOBALS
+    // ==========================================================================
+    
+    let audioData = null;
+    let sampleRate = 44100;
+    let demodulatedFreq = null;  // Pre-computed frequency array
+    let dopplerOffset = 0;
+    let debugLog = [];
+    
+    // ==========================================================================
+    // UI HANDLERS
+    // ==========================================================================
+    
+    document.getElementById('fileInput').addEventListener('change', handleFileSelect);
+    document.getElementById('analyzeBtn').addEventListener('click', analyzeSignal);
+    document.getElementById('decodeBtn').addEventListener('click', handleDecode);
+    document.getElementById('saveBtn').addEventListener('click', saveImage);
+    
+    function log(msg) {
+        const timestamp = new Date().toISOString().substr(11, 12);
+        debugLog.push(`[${timestamp}] ${msg}`);
+        const logDiv = document.getElementById('debugLog');
+        logDiv.innerHTML = debugLog.slice(-100).join('<br>');
+        logDiv.scrollTop = logDiv.scrollHeight;
+        console.log(msg);
+    }
+    
+    function updateProgress(percent) {
+        document.getElementById('progressFill').style.width = percent + '%';
+    }
+    
+    function showError(msg) {
+        const errorDiv = document.getElementById('error');
+        errorDiv.style.display = 'block';
+        errorDiv.textContent = msg;
+        log('ERROR: ' + msg);
+    }
+    
+    // ==========================================================================
+    // WAV LOADING
+    // ==========================================================================
+    
+    function handleFileSelect(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+        
+        debugLog = [];
+        log(`Loading: ${file.name} (${Math.round(file.size/1024)} KB)`);
+        
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            try {
+                parseWAV(e.target.result);
+                document.getElementById('analyzeBtn').disabled = false;
+                document.getElementById('decodeBtn').disabled = false;
+                
+                const duration = (audioData.length / sampleRate).toFixed(2);
+                const info = document.getElementById('fileInfo');
+                info.style.display = 'block';
+                info.innerHTML = `Sample rate: ${sampleRate} Hz | Duration: ${duration}s | Samples: ${audioData.length.toLocaleString()}`;
+                
+                log(`WAV loaded: ${sampleRate}Hz, ${duration}s, ${audioData.length} samples`);
+                
+                drawWaveform();
+                
+            } catch (err) {
+                showError('WAV read error: ' + err.message);
+            }
+        };
+        reader.readAsArrayBuffer(file);
+    }
+    
+    function parseWAV(arrayBuffer) {
+        const view = new DataView(arrayBuffer);
+        
+        const riff = String.fromCharCode(view.getUint8(0), view.getUint8(1), view.getUint8(2), view.getUint8(3));
+        if (riff !== 'RIFF') throw new Error('Invalid WAV: no RIFF header');
+        
+        const wave = String.fromCharCode(view.getUint8(8), view.getUint8(9), view.getUint8(10), view.getUint8(11));
+        if (wave !== 'WAVE') throw new Error('Invalid WAV: no WAVE marker');
+        
+        let offset = 12;
+        let bitsPerSample = 16;
+        
+        while (offset < arrayBuffer.byteLength - 8) {
+            const chunkId = String.fromCharCode(
+                view.getUint8(offset), view.getUint8(offset+1),
+                view.getUint8(offset+2), view.getUint8(offset+3)
+            );
+            const chunkSize = view.getUint32(offset + 4, true);
+            
+            if (chunkId === 'fmt ') {
+                sampleRate = view.getUint32(offset + 12, true);
+                bitsPerSample = view.getUint16(offset + 22, true);
+                log(`Format: PCM ${bitsPerSample}-bit, ${sampleRate} Hz`);
+            }
+            
+            if (chunkId === 'data') {
+                const bytesPerSample = bitsPerSample / 8;
+                const samples = chunkSize / bytesPerSample;
+                audioData = new Float32Array(samples);
+                
+                for (let i = 0; i < samples; i++) {
+                    if (bitsPerSample === 16) {
+                        audioData[i] = view.getInt16(offset + 8 + i * 2, true) / 32768.0;
+                    } else if (bitsPerSample === 8) {
+                        audioData[i] = (view.getUint8(offset + 8 + i) - 128) / 128.0;
+                    }
+                }
+                
+                log(`Data loaded: ${samples.toLocaleString()} samples`);
+                return;
+            }
+            
+            offset += 8 + chunkSize;
+            if (chunkSize % 2 !== 0) offset++;
+        }
+        
+        throw new Error('No data chunk found in WAV');
+    }
+    
+    // ==========================================================================
+    // FM DEMODULATION - PLL (Phase-Locked Loop)
+    // ==========================================================================
+    
+    class PLL {
+        constructor(sampleRate, centerFreq = 1900, bandwidth = 500) {
+            this.sampleRate = sampleRate;
+            this.centerFreq = centerFreq;
+            this.phase = 0;
+            this.freq = centerFreq;
+            
+            // PLL loop filter coefficients
+            // Bandwidth determines tracking speed vs noise immunity
+            const damping = 0.707;  // Critically damped
+            const omega = 2 * Math.PI * bandwidth / sampleRate;
+            
+            this.alpha = 2 * damping * omega;  // Phase detector gain
+            this.beta = omega * omega;          // Frequency detector gain
+            
+            // Limits
+            this.minFreq = 1000;
+            this.maxFreq = 2500;
+        }
+        
+        process(sample) {
+            // Generate local oscillator
+            const lo_i = Math.cos(this.phase);
+            const lo_q = Math.sin(this.phase);
+            
+            // Phase detector (multiply and get phase error)
+            // For real input, we use a simplified approach
+            const phaseError = sample * lo_q;
+            
+            // Loop filter (PI controller)
+            this.freq += this.beta * phaseError;
+            this.freq = Math.max(this.minFreq, Math.min(this.maxFreq, this.freq));
+            
+            const phaseAdj = this.alpha * phaseError;
+            
+            // Update phase
+            this.phase += 2 * Math.PI * this.freq / this.sampleRate + phaseAdj;
+            
+            // Wrap phase
+            while (this.phase > 2 * Math.PI) this.phase -= 2 * Math.PI;
+            while (this.phase < 0) this.phase += 2 * Math.PI;
+            
+            return this.freq;
+        }
+        
+        reset(freq = 1900) {
+            this.freq = freq;
+            this.phase = 0;
+        }
+    }
+    
+    // ==========================================================================
+    // FM DEMODULATION - Zero Crossing with Interpolation
+    // ==========================================================================
+    
+    function demodulateZeroCrossing(samples, sampleRate, outputLength = null) {
+        const n = samples.length;
+        const freqs = new Float32Array(outputLength || n);
+        
+        let crossings = [];
+        let lastSign = samples[0] >= 0 ? 1 : -1;
+        
+        // Find all zero crossings with sub-sample interpolation
+        for (let i = 1; i < n; i++) {
+            const sign = samples[i] >= 0 ? 1 : -1;
+            if (sign !== lastSign) {
+                // Linear interpolation for exact crossing point
+                const frac = Math.abs(samples[i-1]) / (Math.abs(samples[i-1]) + Math.abs(samples[i]));
+                crossings.push(i - 1 + frac);
+                lastSign = sign;
+            }
+        }
+        
+        // Convert crossings to instantaneous frequency
+        if (crossings.length < 2) {
+            freqs.fill(1500);
+            return freqs;
+        }
+        
+        let freqIdx = 0;
+        for (let i = 1; i < crossings.length; i++) {
+            const halfPeriod = crossings[i] - crossings[i-1];
+            const freq = sampleRate / (halfPeriod * 2);
+            
+            // Only accept valid SSTV frequencies
+            if (freq >= 1000 && freq <= 2500) {
+                const startSample = Math.floor(crossings[i-1]);
+                const endSample = Math.min(Math.floor(crossings[i]), freqs.length - 1);
+                
+                for (let j = startSample; j <= endSample; j++) {
+                    if (j < freqs.length) freqs[j] = freq;
+                }
+            }
+        }
+        
+        // Fill gaps (areas with no valid crossings)
+        let lastValid = 1500;
+        for (let i = 0; i < freqs.length; i++) {
+            if (freqs[i] === 0) {
+                freqs[i] = lastValid;
+            } else {
+                lastValid = freqs[i];
+            }
+        }
+        
+        return freqs;
+    }
+    
+    // ==========================================================================
+    // FM DEMODULATION - Quadrature (Hilbert Transform)
+    // ==========================================================================
+    
+    function demodulateQuadrature(samples, sampleRate) {
+        const n = samples.length;
+        const freqs = new Float32Array(n);
+        
+        // Hilbert transform via FIR filter (truncated ideal)
+        // Using a simple 31-tap approximation
+        const hilbertLen = 31;
+        const hilbert = new Float32Array(hilbertLen);
+        const mid = Math.floor(hilbertLen / 2);
+        
+        for (let i = 0; i < hilbertLen; i++) {
+            const k = i - mid;
+            if (k === 0) {
+                hilbert[i] = 0;
+            } else if (k % 2 !== 0) {
+                hilbert[i] = 2 / (Math.PI * k);
+            } else {
+                hilbert[i] = 0;
+            }
+        }
+        
+        // Apply Hilbert transform to get quadrature component
+        const Q = new Float32Array(n);
+        for (let i = mid; i < n - mid; i++) {
+            let sum = 0;
+            for (let j = 0; j < hilbertLen; j++) {
+                sum += samples[i - mid + j] * hilbert[j];
+            }
+            Q[i] = sum;
+        }
+        
+        // Instantaneous frequency from phase derivative
+        // f = (1/2π) * d(atan2(Q,I))/dt
+        for (let i = 1; i < n - 1; i++) {
+            const I = samples[i];
+            const Iq = Q[i];
+            const I_prev = samples[i-1];
+            const Q_prev = Q[i-1];
+            
+            // Phase difference using cross-product formula
+            // avoids atan2 discontinuities
+            const num = I * Q_prev - Iq * I_prev;
+            const den = I * I_prev + Iq * Q_prev;
+            
+            let dPhase = Math.atan2(num, den);
+            let freq = dPhase * sampleRate / (2 * Math.PI);
+            
+            // Shift to positive frequency (baseband to SSTV range)
+            freq = Math.abs(freq);
+            
+            // This gives us deviation from carrier - need to add center freq
+            // Actually for SSTV audio, we measure directly
+            // Re-estimate using zero-crossing for now on problem areas
+            if (freq < 500) {
+                // Low freq = near zero crossing, estimate from amplitude
+                freq = 1500; // Default to black level
+            } else if (freq > 2500) {
+                freq = 2300;
+            } else if (freq < 1000) {
+                freq = 1200;
+            }
+            
+            freqs[i] = freq;
+        }
+        
+        freqs[0] = freqs[1];
+        freqs[n-1] = freqs[n-2];
+        
+        return freqs;
+    }
+    
+    // ==========================================================================
+    // HYBRID DEMODULATOR - Best of both methods
+    // ==========================================================================
+    
+    function demodulateHybrid(samples, sampleRate) {
+        const n = samples.length;
+        
+        // Use zero-crossing as primary (most reliable for clean signals)
+        const freqZC = demodulateZeroCrossing(samples, sampleRate);
+        
+        // Apply median filter to remove spikes (3-tap)
+        const freqs = new Float32Array(n);
+        for (let i = 1; i < n - 1; i++) {
+            const a = freqZC[i-1], b = freqZC[i], c = freqZC[i+1];
+            // Median of 3
+            if ((a <= b && b <= c) || (c <= b && b <= a)) {
+                freqs[i] = b;
+            } else if ((b <= a && a <= c) || (c <= a && a <= b)) {
+                freqs[i] = a;
+            } else {
+                freqs[i] = c;
+            }
+        }
+        freqs[0] = freqs[1];
+        freqs[n-1] = freqs[n-2];
+        
+        // Light smoothing (exponential moving average)
+        const alpha = 0.3;
+        let smoothed = freqs[0];
+        for (let i = 0; i < n; i++) {
+            smoothed = alpha * freqs[i] + (1 - alpha) * smoothed;
+            freqs[i] = smoothed;
+        }
+        
+        return freqs;
+    }
+    
+    // ==========================================================================
+    // FULL AUDIO DEMODULATION (run once, cache result)
+    // ==========================================================================
+    
+    function demodulateFullAudio() {
+        log('Demodulating full audio stream...');
+        const startTime = performance.now();
+        
+        // Process in chunks for progress updates
+        const chunkSize = sampleRate; // 1 second chunks
+        const numChunks = Math.ceil(audioData.length / chunkSize);
+        
+        demodulatedFreq = new Float32Array(audioData.length);
+        
+        for (let chunk = 0; chunk < numChunks; chunk++) {
+            const start = chunk * chunkSize;
+            const end = Math.min(start + chunkSize, audioData.length);
+            const samples = audioData.slice(start, end);
+            
+            const freqs = demodulateHybrid(samples, sampleRate);
+            demodulatedFreq.set(freqs, start);
+            
+            updateProgress((chunk + 1) / numChunks * 50); // First 50%
+        }
+        
+        const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
+        log(`Demodulation complete in ${elapsed}s`);
+        
+        return demodulatedFreq;
+    }
+    
+    // ==========================================================================
+    // DOPPLER ESTIMATION via SYNC PULSES
+    // ==========================================================================
+    
+    function estimateDoppler() {
+        if (!demodulatedFreq) demodulateFullAudio();
+        
+        log('Estimating Doppler shift from sync pulses...');
+        
+        const samplesPerMs = sampleRate / 1000;
+        const windowSize = Math.floor(5 * samplesPerMs); // 5ms windows
+        const step = Math.floor(10 * samplesPerMs);       // 10ms steps
+        
+        const syncFreqs = [];
+        
+        // Search for 1200Hz sync pulses
+        for (let i = 0; i < demodulatedFreq.length - windowSize; i += step) {
+            // Average frequency in window
+            let sum = 0;
+            for (let j = 0; j < windowSize; j++) {
+                sum += demodulatedFreq[i + j];
+            }
+            const avgFreq = sum / windowSize;
+            
+            // If it looks like a sync pulse (around 1200Hz)
+            if (avgFreq > 1100 && avgFreq < 1350) {
+                syncFreqs.push({
+                    time: i / sampleRate,
+                    freq: avgFreq
+                });
+            }
+        }
+        
+        if (syncFreqs.length < 10) {
+            log('Not enough sync pulses found for Doppler estimation');
+            return 0;
+        }
+        
+        // Calculate average deviation from 1200Hz
+        let totalDeviation = 0;
+        for (const s of syncFreqs) {
+            totalDeviation += s.freq - FREQ.SYNC;
+        }
+        const avgDoppler = totalDeviation / syncFreqs.length;
+        
+        // Also check for Doppler drift (linear regression)
+        const n = syncFreqs.length;
+        let sumX = 0, sumY = 0, sumXY = 0, sumXX = 0;
+        for (const s of syncFreqs) {
+            sumX += s.time;
+            sumY += s.freq - FREQ.SYNC;
+            sumXY += s.time * (s.freq - FREQ.SYNC);
+            sumXX += s.time * s.time;
+        }
+        const slope = (n * sumXY - sumX * sumY) / (n * sumXX - sumX * sumX);
+        
+        log(`Doppler: avg=${avgDoppler.toFixed(1)}Hz, drift=${slope.toFixed(3)}Hz/s`);
+        log(`Found ${syncFreqs.length} sync pulses`);
+        
+        return avgDoppler;
+    }
+    
+    // ==========================================================================
+    // VIS CODE DETECTION
+    // ==========================================================================
+    
+    function detectVIS() {
+        if (!demodulatedFreq) demodulateFullAudio();
+        
+        log('Searching for VIS code...');
+        
+        const samplesPerMs = sampleRate / 1000;
+        const windowSize = Math.floor(20 * samplesPerMs);
+        
+        // Find VIS leader (1900Hz for ~300ms)
+        let leaderStart = -1;
+        
+        for (let i = 0; i < Math.min(demodulatedFreq.length, sampleRate * 5); i += windowSize) {
+            let sum = 0;
+            for (let j = 0; j < windowSize && i + j < demodulatedFreq.length; j++) {
+                sum += demodulatedFreq[i + j];
+            }
+            const avgFreq = sum / windowSize;
+            
+            if (avgFreq > 1850 + dopplerOffset && avgFreq < 1950 + dopplerOffset) {
+                leaderStart = i;
+                log(`VIS leader found at ${(i/sampleRate).toFixed(3)}s (${avgFreq.toFixed(0)}Hz)`);
+                break;
+            }
+        }
+        
+        if (leaderStart < 0) {
+            log('No VIS leader found');
+            return null;
+        }
+        
+        // Skip: Leader(300ms) + Break(10ms) + Leader(300ms) = 610ms
+        const visDataStart = leaderStart + Math.floor(620 * samplesPerMs);
+        const bitDuration = Math.floor(30 * samplesPerMs);
+        
+        // Read 8 data bits
+        let visCode = 0;
+        log('Reading VIS bits:');
+        
+        for (let bit = 0; bit < 8; bit++) {
+            const bitStart = visDataStart + bit * bitDuration;
+            const bitCenter = bitStart + Math.floor(bitDuration / 2);
+            
+            // Sample middle of bit
+            let sum = 0;
+            const sampleWindow = Math.floor(10 * samplesPerMs);
+            for (let j = 0; j < sampleWindow; j++) {
+                const idx = bitCenter - sampleWindow/2 + j;
+                if (idx >= 0 && idx < demodulatedFreq.length) {
+                    sum += demodulatedFreq[idx];
+                }
+            }
+            const avgFreq = sum / sampleWindow;
+            
+            // 1100Hz = 1, 1300Hz = 0 (with Doppler offset)
+            const threshold = 1200 + dopplerOffset;
+            const bitValue = avgFreq < threshold ? 1 : 0;
+            visCode |= (bitValue << bit);
+            
+            log(`  Bit ${bit}: ${avgFreq.toFixed(0)}Hz -> ${bitValue}`);
+        }
+        
+        log(`VIS code: 0x${visCode.toString(16).toUpperCase()} (${visCode})`);
+        
+        // Calculate theoretical image start (after parity + stop bit)
+        const theoreticalStart = visDataStart + 10 * bitDuration;
+        
+        // But we need to find the REAL first sync pulse after the VIS
+        // Search for first 1200Hz sync pulse (duration ~9ms) after theoretical start
+        log('Searching for first line sync after VIS...');
+        
+        const searchStart = theoreticalStart;
+        const searchEnd = Math.min(theoreticalStart + Math.floor(500 * samplesPerMs), demodulatedFreq.length);
+        const minSyncDuration = Math.floor(4 * samplesPerMs);
+        const maxSyncDuration = Math.floor(15 * samplesPerMs);
+        
+        let inSync = false;
+        let syncStart = 0;
+        let firstSyncFound = -1;
+        
+        for (let i = searchStart; i < searchEnd; i += Math.floor(samplesPerMs)) {
+            const freq = demodulatedFreq[i];
+            
+            if (freq > 1100 + dopplerOffset && freq < 1300 + dopplerOffset) {
+                if (!inSync) {
+                    syncStart = i;
+                    inSync = true;
+                }
+            } else {
+                if (inSync) {
+                    const duration = i - syncStart;
+                    // Valid sync pulse should be 4-15ms (accounting for Robot 9ms, Martin 4.8ms, etc)
+                    if (duration >= minSyncDuration && duration <= maxSyncDuration) {
+                        firstSyncFound = syncStart;
+                        log(`First line sync found at ${(syncStart/sampleRate*1000).toFixed(2)}ms (duration ${(duration/samplesPerMs).toFixed(2)}ms)`);
+                        break;
+                    }
+                    inSync = false;
+                }
+            }
+        }
+        
+        let imageStart;
+        if (firstSyncFound > 0) {
+            imageStart = firstSyncFound;
+            log(`Image starts at first sync: ${(imageStart/sampleRate*1000).toFixed(2)}ms`);
+        } else {
+            imageStart = theoreticalStart;
+            log(`No sync found, using theoretical start: ${(imageStart/sampleRate*1000).toFixed(2)}ms`, 'warning');
+        }
+        
+        return { visCode, imageStart, leaderStart };
+    }
+    
+    // ==========================================================================
+    // SYNC PULSE DETECTION (for line timing)
+    // ==========================================================================
+    
+    function findSyncPulses(startSample, numSamples, syncMs) {
+        const samplesPerMs = sampleRate / 1000;
+        const syncDuration = Math.floor(syncMs * samplesPerMs);
+        const searchWindow = Math.floor(5 * samplesPerMs);
+        
+        const syncs = [];
+        
+        const threshold = 1250 + dopplerOffset;
+        const minFreq = 1100 + dopplerOffset;
+        
+        let inSync = false;
+        let syncStart = 0;
+        
+        for (let i = startSample; i < startSample + numSamples; i += searchWindow) {
+            // Check average frequency in window
+            let sum = 0, count = 0;
+            for (let j = 0; j < searchWindow && i + j < demodulatedFreq.length; j++) {
+                sum += demodulatedFreq[i + j];
+                count++;
+            }
+            const avgFreq = sum / count;
+            
+            if (avgFreq < threshold && avgFreq > minFreq) {
+                if (!inSync) {
+                    syncStart = i;
+                    inSync = true;
+                }
+            } else {
+                if (inSync) {
+                    const syncLen = i - syncStart;
+                    // Valid sync should be close to expected duration
+                    if (syncLen > syncDuration * 0.5 && syncLen < syncDuration * 2) {
+                        syncs.push({
+                            start: syncStart,
+                            end: i,
+                            duration: syncLen / samplesPerMs
+                        });
+                    }
+                    inSync = false;
+                }
+            }
+        }
+        
+        return syncs;
+    }
+    
+    // ==========================================================================
+    // FREQUENCY TO PIXEL CONVERSION
+    // ==========================================================================
+    
+    function freqToPixel(freq, offset = 0) {
+        const adjustedFreq = freq - offset;
+        const normalized = (adjustedFreq - FREQ.BLACK) / FREQ.RANGE;
+        return Math.max(0, Math.min(255, Math.round(normalized * 255)));
+    }
+    
+    // ==========================================================================
+    // DECODE LINE DATA
+    // ==========================================================================
+    
+    function decodeLine(startSample, durationMs, numPixels) {
+        const samplesPerMs = sampleRate / 1000;
+        const totalSamples = Math.floor(durationMs * samplesPerMs);
+        const samplesPerPixel = totalSamples / numPixels;
+        
+        const pixels = new Uint8Array(numPixels);
+        
+        for (let px = 0; px < numPixels; px++) {
+            const sampleStart = Math.floor(startSample + px * samplesPerPixel);
+            const sampleEnd = Math.floor(startSample + (px + 1) * samplesPerPixel);
+            
+            // Average frequency for this pixel
+            let sum = 0, count = 0;
+            for (let i = sampleStart; i < sampleEnd && i < demodulatedFreq.length; i++) {
+                sum += demodulatedFreq[i];
+                count++;
+            }
+            
+            const avgFreq = count > 0 ? sum / count : FREQ.BLACK;
+            pixels[px] = freqToPixel(avgFreq, dopplerOffset);
+        }
+        
+        return pixels;
+    }
+    
+    // ==========================================================================
+    // PD MODE DECODER
+    // ==========================================================================
+    
+    function decodePD(mode, imageStart) {
+        const canvas = document.getElementById('canvas');
+        canvas.width = mode.width;
+        canvas.height = mode.height;
+        const ctx = canvas.getContext('2d');
+        const imgData = ctx.createImageData(mode.width, mode.height);
+        
+        const samplesPerMs = sampleRate / 1000;
+        
+        // PD timing: Sync(20ms) + Porch(2.08ms) + Y0 + R-Y + B-Y + Y1
+        // All 4 data components have same duration (scanMs)
+        const syncSamples = Math.floor(mode.syncMs * samplesPerMs);
+        const porchSamples = Math.floor(mode.porchMs * samplesPerMs);
+        const scanSamples = Math.floor(mode.scanMs * samplesPerMs);
+        
+        const pairDuration = mode.syncMs + mode.porchMs + mode.scanMs * 4;
+        const samplesPerPair = Math.floor(pairDuration * samplesPerMs);
+        const numPairs = Math.floor(mode.height / 2);
+        
+        log(`PD decode: ${numPairs} line pairs`);
+        log(`Timing: Sync=${mode.syncMs}ms, Porch=${mode.porchMs}ms, Scan=${mode.scanMs}ms`);
+        log(`Pair duration: ${pairDuration.toFixed(2)}ms = ${samplesPerPair} samples`);
+        
+        // Optional: Find first sync for better alignment
+        const slantCorrection = parseFloat(document.getElementById('slantCorrection').value) || 0;
+        const slantSamplesPerLine = slantCorrection * samplesPerMs;
+        
+        for (let pair = 0; pair < numPairs; pair++) {
+            // Apply slant correction
+            const slantOffset = Math.floor(pair * 2 * slantSamplesPerLine);
+            const pairStart = imageStart + pair * samplesPerPair + slantOffset;
+            
+            // Component positions
+            const y0Start = pairStart + syncSamples + porchSamples;
+            const ryStart = y0Start + scanSamples;
+            const byStart = ryStart + scanSamples;
+            const y1Start = byStart + scanSamples;
+            
+            // Decode each component
+            const Y0 = decodeLine(y0Start, mode.scanMs, mode.width);
+            const RY = decodeLine(ryStart, mode.scanMs, mode.width);  // V
+            const BY = decodeLine(byStart, mode.scanMs, mode.width);  // U
+            const Y1 = decodeLine(y1Start, mode.scanMs, mode.width);
+            
+            // Convert YUV to RGB for both lines
+            for (let lineOffset = 0; lineOffset < 2; lineOffset++) {
+                const line = pair * 2 + lineOffset;
+                if (line >= mode.height) break;
+                
+                const Y = lineOffset === 0 ? Y0 : Y1;
+                
+                for (let x = 0; x < mode.width; x++) {
+                    const y = Y[x];
+                    const u = BY[x] - 128;  // B-Y
+                    const v = RY[x] - 128;  // R-Y
+                    
+                    // YUV to RGB (BT.601)
+                    const r = y + 1.402 * v;
+                    const g = y - 0.344 * u - 0.714 * v;
+                    const b = y + 1.772 * u;
+                    
+                    const idx = (line * mode.width + x) * 4;
+                    imgData.data[idx]     = Math.max(0, Math.min(255, Math.round(r)));
+                    imgData.data[idx + 1] = Math.max(0, Math.min(255, Math.round(g)));
+                    imgData.data[idx + 2] = Math.max(0, Math.min(255, Math.round(b)));
+                    imgData.data[idx + 3] = 255;
+                }
+            }
+            
+            // Update progress (50-100%)
+            updateProgress(50 + (pair + 1) / numPairs * 50);
+            
+            // Update canvas periodically
+            if (pair % 10 === 0) {
+                ctx.putImageData(imgData, 0, 0);
+            }
+        }
+        
+        ctx.putImageData(imgData, 0, 0);
+        log('PD decode complete');
+    }
+    
+    // ==========================================================================
+    // ROBOT MODE DECODER
+    // ==========================================================================
+    
+    function decodeRobot(mode, imageStart) {
+        const canvas = document.getElementById('canvas');
+        canvas.width = mode.width;
+        canvas.height = mode.height;
+        const ctx = canvas.getContext('2d');
+        const imgData = ctx.createImageData(mode.width, mode.height);
+        
+        const samplesPerMs = sampleRate / 1000;
+        
+        // Robot timing
+        const syncSamples = Math.floor(mode.syncMs * samplesPerMs);
+        const porchSamples = Math.floor(mode.porchMs * samplesPerMs);
+        const scanSamples = Math.floor(mode.scanMs * samplesPerMs);
+        const sepSamples = Math.floor((mode.separatorMs || 0) * samplesPerMs);
+        const chromaPorchSamples = Math.floor((mode.chromaPorchMs || 0) * samplesPerMs);
+        const chromaSamples = Math.floor((mode.chromaMs || 0) * samplesPerMs);
+        
+        const lineDuration = mode.syncMs + mode.porchMs + mode.scanMs + 
+                           (mode.separatorMs || 0) + (mode.chromaPorchMs || 0) + (mode.chromaMs || 0);
+        const samplesPerLine = Math.floor(lineDuration * samplesPerMs);
+        
+        log(`Robot decode: ${mode.height} lines, ${lineDuration.toFixed(2)}ms/line`);
+        
+        const Y = [], U = [], V = [];
+        
+        for (let line = 0; line < mode.height; line++) {
+            const lineStart = imageStart + line * samplesPerLine;
+            
+            // Y (luminance)
+            const yStart = lineStart + syncSamples + porchSamples;
+            Y[line] = decodeLine(yStart, mode.scanMs, mode.width);
+            
+            // Chrominance (if color mode)
+            if (mode.chromaMs) {
+                const chromaStart = yStart + scanSamples + sepSamples + chromaPorchSamples;
+                const chromaData = decodeLine(chromaStart, mode.chromaMs, mode.width);
+                
+                // Even lines = R-Y (V), Odd lines = B-Y (U)
+                if (line % 2 === 0) {
+                    V[line] = chromaData;
+                    U[line] = line > 0 ? U[line-1] : new Uint8Array(mode.width).fill(128);
+                } else {
+                    U[line] = chromaData;
+                    V[line] = V[line-1] || new Uint8Array(mode.width).fill(128);
+                }
+            } else {
+                U[line] = new Uint8Array(mode.width).fill(128);
+                V[line] = new Uint8Array(mode.width).fill(128);
+            }
+            
+            updateProgress(50 + (line + 1) / mode.height * 50);
+        }
+        
+        // Convert to RGB
+        for (let line = 0; line < mode.height; line++) {
+            for (let x = 0; x < mode.width; x++) {
+                const y = Y[line][x];
+                const u = (U[line] ? U[line][x] : 128) - 128;
+                const v = (V[line] ? V[line][x] : 128) - 128;
+                
+                const r = y + 1.402 * v;
+                const g = y - 0.344 * u - 0.714 * v;
+                const b = y + 1.772 * u;
+                
+                const idx = (line * mode.width + x) * 4;
+                imgData.data[idx]     = Math.max(0, Math.min(255, Math.round(r)));
+                imgData.data[idx + 1] = Math.max(0, Math.min(255, Math.round(g)));
+                imgData.data[idx + 2] = Math.max(0, Math.min(255, Math.round(b)));
+                imgData.data[idx + 3] = 255;
+            }
+        }
+        
+        ctx.putImageData(imgData, 0, 0);
+        log('Robot decode complete');
+    }
+    
+    // ==========================================================================
+    // MARTIN MODE DECODER
+    // ==========================================================================
+    
+    function decodeMartin(mode, imageStart) {
+        const canvas = document.getElementById('canvas');
+        canvas.width = mode.width;
+        canvas.height = mode.height;
+        const ctx = canvas.getContext('2d');
+        const imgData = ctx.createImageData(mode.width, mode.height);
+        
+        const samplesPerMs = sampleRate / 1000;
+        
+        const syncSamples = Math.floor(mode.syncMs * samplesPerMs);
+        const porchSamples = Math.floor(mode.porchMs * samplesPerMs);
+        const scanSamples = Math.floor(mode.scanMs * samplesPerMs);
+        const sepSamples = Math.floor(mode.separatorMs * samplesPerMs);
+        
+        // Martin: Sync + Porch + G + Sep + B + Sep + R + Sep
+        const lineDuration = mode.syncMs + mode.porchMs + mode.scanMs * 3 + mode.separatorMs * 3;
+        const samplesPerLine = Math.floor(lineDuration * samplesPerMs);
+        
+        log(`Martin decode: ${mode.height} lines, ${lineDuration.toFixed(2)}ms/line`);
+        
+        for (let line = 0; line < mode.height; line++) {
+            const lineStart = imageStart + line * samplesPerLine;
+            
+            const gStart = lineStart + syncSamples + porchSamples;
+            const bStart = gStart + scanSamples + sepSamples;
+            const rStart = bStart + scanSamples + sepSamples;
+            
+            const G = decodeLine(gStart, mode.scanMs, mode.width);
+            const B = decodeLine(bStart, mode.scanMs, mode.width);
+            const R = decodeLine(rStart, mode.scanMs, mode.width);
+            
+            for (let x = 0; x < mode.width; x++) {
+                const idx = (line * mode.width + x) * 4;
+                imgData.data[idx]     = R[x];
+                imgData.data[idx + 1] = G[x];
+                imgData.data[idx + 2] = B[x];
+                imgData.data[idx + 3] = 255;
+            }
+            
+            updateProgress(50 + (line + 1) / mode.height * 50);
+        }
+        
+        ctx.putImageData(imgData, 0, 0);
+        log('Martin decode complete');
+    }
+    
+    // ==========================================================================
+    // SCOTTIE MODE DECODER
+    // ==========================================================================
+    
+    function decodeScottie(mode, imageStart) {
+        const canvas = document.getElementById('canvas');
+        canvas.width = mode.width;
+        canvas.height = mode.height;
+        const ctx = canvas.getContext('2d');
+        const imgData = ctx.createImageData(mode.width, mode.height);
+        
+        const samplesPerMs = sampleRate / 1000;
+        
+        const syncSamples = Math.floor(mode.syncMs * samplesPerMs);
+        const porchSamples = Math.floor(mode.porchMs * samplesPerMs);
+        const scanSamples = Math.floor(mode.scanMs * samplesPerMs);
+        const sepSamples = Math.floor(mode.separatorMs * samplesPerMs);
+        
+        // Scottie: Sep + G + Sep + B + Sync + Porch + R
+        const lineDuration = mode.separatorMs * 2 + mode.scanMs * 3 + mode.syncMs + mode.porchMs;
+        const samplesPerLine = Math.floor(lineDuration * samplesPerMs);
+        
+        log(`Scottie decode: ${mode.height} lines, ${lineDuration.toFixed(2)}ms/line`);
+        
+        // Initial sync before first line
+        let currentSample = imageStart + syncSamples;
+        
+        for (let line = 0; line < mode.height; line++) {
+            // Sep + G
+            const gStart = currentSample + sepSamples;
+            const G = decodeLine(gStart, mode.scanMs, mode.width);
+            
+            // Sep + B
+            const bStart = gStart + scanSamples + sepSamples;
+            const B = decodeLine(bStart, mode.scanMs, mode.width);
+            
+            // Sync + Porch + R
+            const rStart = bStart + scanSamples + syncSamples + porchSamples;
+            const R = decodeLine(rStart, mode.scanMs, mode.width);
+            
+            for (let x = 0; x < mode.width; x++) {
+                const idx = (line * mode.width + x) * 4;
+                imgData.data[idx]     = R[x];
+                imgData.data[idx + 1] = G[x];
+                imgData.data[idx + 2] = B[x];
+                imgData.data[idx + 3] = 255;
+            }
+            
+            currentSample += samplesPerLine;
+            updateProgress(50 + (line + 1) / mode.height * 50);
+        }
+        
+        ctx.putImageData(imgData, 0, 0);
+        log('Scottie decode complete');
+    }
+    
+    // ==========================================================================
+    // SIGNAL ANALYSIS
+    // ==========================================================================
+    
+    function analyzeSignal() {
+        const status = document.getElementById('status');
+        const progressBar = document.getElementById('progressBar');
+        
+        progressBar.style.display = 'block';
+        status.style.display = 'block';
+        status.textContent = 'Analyzing signal...';
+        
+        setTimeout(() => {
+            try {
+                // Demodulate
+                demodulateFullAudio();
+                
+                // Estimate Doppler
+                const doppler = estimateDoppler();
+                document.getElementById('statDoppler').textContent = doppler.toFixed(1);
+                
+                // Apply Doppler correction if AFC enabled
+                if (document.getElementById('afcMode').value === 'auto') {
+                    dopplerOffset = doppler;
+                    document.getElementById('dopplerOffset').value = Math.round(doppler);
+                    log(`AFC: Applied Doppler correction of ${doppler.toFixed(1)}Hz`);
+                }
+                
+                // Detect VIS
+                const vis = detectVIS();
+                if (vis && VIS_TO_MODE[vis.visCode]) {
+                    const modeName = VIS_TO_MODE[vis.visCode];
+                    document.getElementById('statMode').textContent = SSTV_MODES[modeName].name;
+                    document.getElementById('forceMode').value = modeName;
+                } else {
+                    document.getElementById('statMode').textContent = 'Unknown';
+                }
+                
+                // Estimate SNR (rough)
+                let signalPower = 0, noisePower = 0;
+                const windowSize = 100;
+                for (let i = 0; i < audioData.length - windowSize; i += windowSize) {
+                    let sum = 0, sumSq = 0;
+                    for (let j = 0; j < windowSize; j++) {
+                        const v = audioData[i + j];
+                        sum += v;
+                        sumSq += v * v;
+                    }
+                    const mean = sum / windowSize;
+                    const variance = sumSq / windowSize - mean * mean;
+                    signalPower += sumSq / windowSize;
+                    noisePower += variance * 0.1; // Rough estimate
+                }
+                const snr = 10 * Math.log10(signalPower / (noisePower + 0.0001));
+                document.getElementById('statSNR').textContent = snr.toFixed(1);
+                
+                // Draw spectrogram
+                drawSpectrogram();
+                
+                status.textContent = 'Analysis complete';
+                updateProgress(100);
+                
+            } catch (err) {
+                showError('Analysis error: ' + err.message);
+                console.error(err);
+            }
+        }, 100);
+    }
+    
+    // ==========================================================================
+    // MAIN DECODE HANDLER
+    // ==========================================================================
+    
+    function handleDecode() {
+        if (!audioData) return;
+        
+        const progressBar = document.getElementById('progressBar');
+        const status = document.getElementById('status');
+        const errorDiv = document.getElementById('error');
+        
+        progressBar.style.display = 'block';
+        status.style.display = 'block';
+        errorDiv.style.display = 'none';
+        
+        // Get manual Doppler offset
+        dopplerOffset = parseFloat(document.getElementById('dopplerOffset').value) || 0;
+        
+        status.textContent = 'Demodulating...';
+        
+        setTimeout(() => {
+            try {
+                // Demodulate if not already done
+                if (!demodulatedFreq) {
+                    demodulateFullAudio();
+                }
+                
+                // Detect mode
+                let modeName = document.getElementById('forceMode').value;
+                let imageStart = 0;
+                
+                if (modeName === 'auto') {
+                    const vis = detectVIS();
+                    if (vis && VIS_TO_MODE[vis.visCode]) {
+                        modeName = VIS_TO_MODE[vis.visCode];
+                        imageStart = vis.imageStart;
+                        log(`Auto-detected: ${modeName}`);
+                    } else {
+                        modeName = 'pd180'; // Default
+                        log('VIS not found, defaulting to PD180');
+                        // Try to find first sync
+                        const syncs = findSyncPulses(0, Math.min(demodulatedFreq.length, sampleRate * 2), 20);
+                        if (syncs.length > 0) {
+                            imageStart = syncs[0].start;
+                            log(`Found first sync at ${(imageStart/sampleRate).toFixed(3)}s`);
+                        }
+                    }
+                } else {
+                    // Manual mode - still try to find VIS for timing
+                    const vis = detectVIS();
+                    if (vis) {
+                        imageStart = vis.imageStart;
+                    } else {
+                        const mode = SSTV_MODES[modeName];
+                        const syncs = findSyncPulses(0, Math.min(demodulatedFreq.length, sampleRate * 2), mode.syncMs);
+                        if (syncs.length > 0) {
+                            imageStart = syncs[0].start;
+                        }
+                    }
+                }
+                
+                const mode = SSTV_MODES[modeName];
+                if (!mode) {
+                    throw new Error('Unknown mode: ' + modeName);
+                }
+                
+                log(`Decoding ${mode.name} from sample ${imageStart} (${(imageStart/sampleRate).toFixed(3)}s)`);
+                status.textContent = `Decoding ${mode.name}...`;
+                
+                // Decode based on mode type
+                switch (mode.lineSequence) {
+                    case 'pd':
+                        decodePD(mode, imageStart);
+                        break;
+                    case 'robot':
+                        decodeRobot(mode, imageStart);
+                        break;
+                    case 'martin':
+                        decodeMartin(mode, imageStart);
+                        break;
+                    case 'scottie':
+                        decodeScottie(mode, imageStart);
+                        break;
+                    default:
+                        throw new Error('Unsupported mode type: ' + mode.lineSequence);
+                }
+                
+                status.textContent = '✓ Decode complete';
+                document.getElementById('saveBtn').disabled = false;
+                
+            } catch (err) {
+                showError('Decode error: ' + err.message);
+                console.error(err);
+            }
+        }, 100);
+    }
+    
+    // ==========================================================================
+    // VISUALIZATION
+    // ==========================================================================
+    
+    function drawWaveform() {
+        const canvas = document.getElementById('waveformCanvas');
+        const ctx = canvas.getContext('2d');
+        const width = canvas.width;
+        const height = canvas.height;
+        
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, width, height);
+        
+        // Draw waveform
+        ctx.strokeStyle = '#00ff00';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        
+        const step = Math.floor(audioData.length / width);
+        for (let x = 0; x < width; x++) {
+            const idx = x * step;
+            const y = height / 2 - audioData[idx] * height / 2;
+            if (x === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+        
+        // Time axis
+        ctx.fillStyle = '#666';
+        ctx.font = '10px monospace';
+        const duration = audioData.length / sampleRate;
+        for (let t = 0; t <= duration; t += 30) {
+            const x = (t / duration) * width;
+            ctx.fillText(t + 's', x, height - 2);
+        }
+    }
+    
+    function drawSpectrogram() {
+        if (!demodulatedFreq) return;
+        
+        const canvas = document.getElementById('spectrogramCanvas');
+        const ctx = canvas.getContext('2d');
+        const width = canvas.width;
+        const height = canvas.height;
+        
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, width, height);
+        
+        // Draw frequency trace
+        ctx.strokeStyle = '#00ffff';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        
+        const step = Math.floor(demodulatedFreq.length / width);
+        for (let x = 0; x < width; x++) {
+            const idx = x * step;
+            const freq = demodulatedFreq[idx];
+            // Map 1100-2400Hz to height
+            const y = height - ((freq - 1100) / 1300) * height;
+            if (x === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+        
+        // Frequency guides
+        ctx.strokeStyle = '#333';
+        ctx.setLineDash([5, 5]);
+        ctx.fillStyle = '#666';
+        ctx.font = '10px monospace';
+        
+        const freqGuides = [1200, 1500, 1900, 2300];
+        for (const f of freqGuides) {
+            const y = height - ((f - 1100) / 1300) * height;
+            ctx.beginPath();
+            ctx.moveTo(0, y);
+            ctx.lineTo(width, y);
+            ctx.stroke();
+            ctx.fillText(f + 'Hz', 5, y - 2);
+        }
+        ctx.setLineDash([]);
+    }
+    
+    // ==========================================================================
+    // SAVE IMAGE
+    // ==========================================================================
+    
+    function saveImage() {
+        const canvas = document.getElementById('canvas');
+        const link = document.createElement('a');
+        link.download = `sstv_decoded_${Date.now()}.png`;
+        link.href = canvas.toDataURL('image/png');
+        link.click();
+    }
+    
+    // ==========================================================================
+    // TAB SWITCHING
+    // ==========================================================================
+    
+    function switchTab(tab) {
+        document.getElementById('fileTabContent').style.display = tab === 'file' ? 'block' : 'none';
+        document.getElementById('liveTabContent').style.display = tab === 'live' ? 'block' : 'none';
+        document.getElementById('tabFile').style.borderColor = tab === 'file' ? '#00ff00' : '#333';
+        document.getElementById('tabFile').style.color = tab === 'file' ? '#00ff00' : '#888';
+        document.getElementById('tabFile').style.background = tab === 'file' ? '#0f0f18' : '#0a0a10';
+        document.getElementById('tabLive').style.borderColor = tab === 'live' ? '#00ff00' : '#333';
+        document.getElementById('tabLive').style.color = tab === 'live' ? '#00ff00' : '#888';
+        document.getElementById('tabLive').style.background = tab === 'live' ? '#0f0f18' : '#0a0a10';
+    }
+    
+    // ==========================================================================
+    // LIVE AUDIO GLOBALS
+    // ==========================================================================
+    
+    const LIVE_BUFFER_SECONDS = 60;
+    const LIVE_BUFFER_SIZE = sampleRate * LIVE_BUFFER_SECONDS;
+    
+    let liveAudioContext = null;
+    let liveMediaStream = null;
+    let liveAnalyserNode = null;
+    
+    const liveAudioBuffer = new Float32Array(LIVE_BUFFER_SIZE);
+    const liveFreqBuffer = new Float32Array(LIVE_BUFFER_SIZE);
+    let liveWriteIndex = 0;
+    let liveTotalSamples = 0;
+    
+    // Demodulator state
+    let liveLastSample = 0;
+    let liveLastCrossing = 0;
+    let liveInstantFreq = 1500;
+    let liveFreqHistory = new Float32Array(5);
+    let liveFreqHistoryIdx = 0;
+    
+    // State machine
+    let liveState = 'idle';
+    let liveCurrentMode = null;
+    let liveDopplerOffset = 0;
+    
+    // VIS detection
+    let liveVisState = 'searching';
+    let liveLeaderStartIdx = -1;
+    let liveLeaderCount = 0;
+    let liveVisBits = [];
+    
+    // Image decoding
+    let liveImageStartIdx = 0;
+    let liveCurrentLine = 0;
+    let liveChromaU = [], liveChromaV = [];
+    
+    // Canvas
+    let liveMainCtx = null;
+    let liveImageData = null;
+    
+    let liveProcessInterval = null;
+    let liveVisualInterval = null;
+    
+    // ==========================================================================
+    // LIVE EVENT LISTENERS
+    // ==========================================================================
+    
+    document.getElementById('startLiveBtn').addEventListener('click', startLiveAudio);
+    document.getElementById('stopLiveBtn').addEventListener('click', stopLiveAudio);
+    document.getElementById('liveSaveBtn').addEventListener('click', saveLiveImage);
+    document.getElementById('liveClearBtn').addEventListener('click', clearLiveImage);
+    document.getElementById('liveDopplerOffset').addEventListener('change', e => {
+        liveDopplerOffset = parseFloat(e.target.value) || 0;
+    });
+    
+    // ==========================================================================
+    // LIVE AUDIO CAPTURE
+    // ==========================================================================
+    
+    async function startLiveAudio() {
+        try {
+            liveLog('Demande de permission audio...');
+            
+            liveAudioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: sampleRate });
+            
+            liveMediaStream = await navigator.mediaDevices.getUserMedia({
+                audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+            });
+            
+            const track = liveMediaStream.getAudioTracks()[0];
+            document.getElementById('liveSourceName').textContent = track.label || 'Microphone par défaut';
+            liveLog('Source: ' + (track.label || 'default'));
+            
+            const source = liveAudioContext.createMediaStreamSource(liveMediaStream);
+            
+            liveAnalyserNode = liveAudioContext.createAnalyser();
+            liveAnalyserNode.fftSize = 2048;
+            
+            const scriptNode = liveAudioContext.createScriptProcessor(1024, 1, 1);
+            scriptNode.onaudioprocess = handleLiveAudioProcess;
+            
+            source.connect(liveAnalyserNode);
+            source.connect(scriptNode);
+            scriptNode.connect(liveAudioContext.destination);
+            
+            // Reset
+            liveWriteIndex = 0;
+            liveTotalSamples = 0;
+            liveLastSample = 0;
+            liveLastCrossing = 0;
+            liveInstantFreq = 1500;
+            resetLiveDecoder();
+            
+            document.getElementById('startLiveBtn').disabled = true;
+            document.getElementById('stopLiveBtn').disabled = false;
+            
+            setLiveState('listening');
+            liveLog('Capture audio démarrée - en attente du signal VIS...');
+            
+            liveProcessInterval = setInterval(processLiveStateMachine, 50);
+            liveVisualInterval = setInterval(updateLiveVisuals, 100);
+            
+        } catch (err) {
+            liveLog('ERREUR: ' + err.message);
+            console.error(err);
+            if (liveAudioContext) { liveAudioContext.close(); liveAudioContext = null; }
+        }
+    }
+    
+    function stopLiveAudio() {
+        if (liveProcessInterval) { clearInterval(liveProcessInterval); liveProcessInterval = null; }
+        if (liveVisualInterval) { clearInterval(liveVisualInterval); liveVisualInterval = null; }
+        if (liveMediaStream) { liveMediaStream.getTracks().forEach(t => t.stop()); liveMediaStream = null; }
+        if (liveAudioContext) { liveAudioContext.close(); liveAudioContext = null; }
+        
+        document.getElementById('startLiveBtn').disabled = false;
+        document.getElementById('stopLiveBtn').disabled = true;
+        document.getElementById('liveSourceName').textContent = '-- Arrêté --';
+        document.getElementById('liveFreqDisplay').textContent = '---- Hz';
+        document.getElementById('levelMeter').style.width = '0%';
+        
+        setLiveState('idle');
+        liveLog('Capture audio arrêtée');
+    }
+    
+    function handleLiveAudioProcess(event) {
+        const input = event.inputBuffer.getChannelData(0);
+        
+        for (let i = 0; i < input.length; i++) {
+            const sample = input[i];
+            const globalIdx = liveTotalSamples + i;
+            
+            liveAudioBuffer[liveWriteIndex] = sample;
+            
+            // Zero-crossing with interpolation
+            if ((liveLastSample < 0 && sample >= 0) || (liveLastSample >= 0 && sample < 0)) {
+                if (liveLastCrossing > 0) {
+                    const frac = Math.abs(liveLastSample) / (Math.abs(liveLastSample) + Math.abs(sample));
+                    const crossing = globalIdx - 1 + frac;
+                    const halfPeriod = crossing - liveLastCrossing;
+                    const freq = sampleRate / (halfPeriod * 2);
+                    
+                    if (freq >= 900 && freq <= 2600) {
+                        // Median filter
+                        liveFreqHistory[liveFreqHistoryIdx] = freq;
+                        liveFreqHistoryIdx = (liveFreqHistoryIdx + 1) % 5;
+                        const sorted = [...liveFreqHistory].sort((a,b) => a-b);
+                        const median = sorted[2];
+                        
+                        // Smoothing
+                        liveInstantFreq = liveInstantFreq * 0.6 + median * 0.4;
+                    }
+                    liveLastCrossing = crossing;
+                } else {
+                    liveLastCrossing = globalIdx;
+                }
+            }
+            liveLastSample = sample;
+            
+            liveFreqBuffer[liveWriteIndex] = liveInstantFreq;
+            liveWriteIndex = (liveWriteIndex + 1) % LIVE_BUFFER_SIZE;
+        }
+        
+        liveTotalSamples += input.length;
+        document.getElementById('liveFreqDisplay').textContent = Math.round(liveInstantFreq) + ' Hz';
+    }
+    
+    function getLiveFreqAt(idx) {
+        const bufStart = liveTotalSamples - LIVE_BUFFER_SIZE;
+        if (idx < bufStart) return 1500;
+        return liveFreqBuffer[idx % LIVE_BUFFER_SIZE] || 1500;
+    }
+    
+    function getLiveAvgFreq(startIdx, count) {
+        let sum = 0, n = 0;
+        for (let i = 0; i < count; i++) {
+            const f = getLiveFreqAt(startIdx + i);
+            if (f > 0) { sum += f; n++; }
+        }
+        return n > 0 ? sum / n : 1500;
+    }
+    
+    // ==========================================================================
+    // LIVE STATE MACHINE
+    // ==========================================================================
+    
+    let liveLastDebugLog = 0;
+    let liveLastScanIdx = 0;
+    
+    function processLiveStateMachine() {
+        if (liveState === 'idle') return;
+        if (liveState === 'listening') detectLiveSignal();
+        else if (liveState === 'receiving') decodeLiveLines();
+    }
+    
+    function detectLiveSignal() {
+        const samplesPerMs = sampleRate / 1000;
+        const currentIdx = liveTotalSamples;
+        if (currentIdx < sampleRate) return; // Attendre 1 seconde de buffer
+        
+        const forcedMode = document.getElementById('liveForceMode').value;
+        const freq = liveInstantFreq - liveDopplerOffset;
+        
+        // Debug log toutes les 2 secondes
+        const now = Date.now();
+        if (now - liveLastDebugLog > 2000) {
+            liveLog('Freq: ' + Math.round(freq) + 'Hz | Mode: ' + forcedMode);
+            liveLastDebugLog = now;
+        }
+        
+        // MODE FORCÉ : scanner le buffer pour trouver un sync valide
+        if (forcedMode !== 'auto') {
+            // Scanner depuis la dernière position vérifiée
+            const scanStart = Math.max(liveLastScanIdx, currentIdx - Math.floor(500 * samplesPerMs));
+            const scanEnd = currentIdx - Math.floor(50 * samplesPerMs); // Garder 50ms de marge
+            
+            if (scanEnd <= scanStart) return;
+            
+            const minSyncSamples = Math.floor(5 * samplesPerMs);  // 5ms min
+            const maxSyncSamples = Math.floor(15 * samplesPerMs); // 15ms max
+            
+            let inSync = false;
+            let syncStart = 0;
+            
+            // Scanner sample par sample (par pas de 1ms pour la perf)
+            const step = Math.floor(samplesPerMs);
+            
+            for (let i = scanStart; i < scanEnd; i += step) {
+                const f = getLiveFreqAt(i);
+                
+                if (!inSync) {
+                    // Chercher début de sync (1200Hz ± 100Hz)
+                    if (f > 1100 && f < 1300) {
+                        inSync = true;
+                        syncStart = i;
+                    }
+                } else {
+                    // Dans le sync - chercher la fin
+                    if (f < 1050 || f > 1400) {
+                        // Sync terminé - vérifier durée
+                        const syncDuration = i - syncStart;
+                        
+                        if (syncDuration >= minSyncSamples && syncDuration <= maxSyncSamples) {
+                            // SYNC VALIDE TROUVÉ!
+                            const durationMs = syncDuration / samplesPerMs;
+                            liveLog('=== SYNC TROUVÉ! ===');
+                            liveLog('Durée: ' + durationMs.toFixed(1) + 'ms');
+                            liveLog('Position: ' + (syncStart / samplesPerMs).toFixed(0) + 'ms');
+                            liveLog('Mode: ' + forcedMode);
+                            
+                            liveCurrentMode = forcedMode;
+                            document.getElementById('liveStatMode').textContent = SSTV_MODES[liveCurrentMode].name;
+                            
+                            // Image starts at this sync
+                            liveImageStartIdx = syncStart;
+                            liveCurrentLine = 0;
+                            liveChromaU = []; liveChromaV = [];
+                            prepareLiveCanvas();
+                            setLiveState('receiving');
+                            liveLog('Décodage en cours...');
+                            return;
+                        }
+                        // Sync trop court ou trop long, continuer
+                        inSync = false;
+                    }
+                }
+            }
+            
+            // Mettre à jour la position de scan
+            liveLastScanIdx = scanEnd;
+            return;
+        }
+        
+        // MODE AUTO : attendre le VIS (1900Hz leader)
+        const windowMs = 20;
+        const windowSamples = Math.floor(windowMs * samplesPerMs);
+        const checkIdx = currentIdx - windowSamples;
+        if (checkIdx < 0) return;
+        
+        const avgFreq = getLiveAvgFreq(checkIdx, windowSamples) - liveDopplerOffset;
+        
+        if (liveVisState === 'searching') {
+            if (avgFreq > 1850 && avgFreq < 1950) {
+                liveLeaderCount++;
+                if (liveLeaderCount > 10) {
+                    liveLog('VIS leader détecté!');
+                    liveVisState = 'leader_found';
+                    liveLeaderStartIdx = checkIdx - (liveLeaderCount * windowSamples);
+                }
+            } else {
+                liveLeaderCount = Math.max(0, liveLeaderCount - 1);
+            }
+        } else if (liveVisState === 'leader_found') {
+            const elapsed = checkIdx - liveLeaderStartIdx;
+            if (elapsed / samplesPerMs > 600 && liveVisBits.length < 8) {
+                liveVisState = 'reading_bits';
+                liveVisBits = [];
+                liveLog('Lecture des bits VIS...');
+            }
+        } else if (liveVisState === 'reading_bits') {
+            const bitDur = 30 * samplesPerMs;
+            const bitsStart = liveLeaderStartIdx + Math.floor(620 * samplesPerMs);
+            const elapsed = checkIdx - bitsStart;
+            const currentBit = Math.floor(elapsed / bitDur);
+            
+            if (currentBit >= 0 && currentBit < 8 && liveVisBits.length === currentBit) {
+                const bitCenter = bitsStart + (currentBit * bitDur) + bitDur / 2;
+                const bitFreq = getLiveAvgFreq(bitCenter, 10 * samplesPerMs) - liveDopplerOffset;
+                const bitVal = bitFreq < 1200 ? 1 : 0;
+                liveVisBits.push(bitVal);
+                liveLog('  Bit ' + currentBit + ': ' + Math.round(bitFreq) + 'Hz -> ' + bitVal);
+            }
+            
+            if (liveVisBits.length >= 8) {
+                let visCode = 0;
+                for (let i = 0; i < 8; i++) if (liveVisBits[i]) visCode |= (1 << i);
+                liveLog('VIS code: 0x' + visCode.toString(16).toUpperCase() + ' (' + visCode + ')');
+                
+                const forced = document.getElementById('liveForceMode').value;
+                if (forced !== 'auto') {
+                    liveCurrentMode = forced;
+                } else if (VIS_TO_MODE[visCode]) {
+                    liveCurrentMode = VIS_TO_MODE[visCode];
+                } else {
+                    liveLog('Code VIS inconnu, retour écoute');
+                    resetLiveVIS();
+                    return;
+                }
+                
+                liveLog('Mode: ' + SSTV_MODES[liveCurrentMode].name);
+                document.getElementById('liveStatMode').textContent = SSTV_MODES[liveCurrentMode].name;
+                
+                // Calculate theoretical start
+                const theoreticalStart = bitsStart + Math.floor(10 * bitDur);
+                
+                // Search for first real sync pulse after theoretical start
+                liveLog('Recherche du premier sync de ligne...');
+                const searchStart = theoreticalStart;
+                const searchEnd = Math.min(theoreticalStart + Math.floor(500 * samplesPerMs), liveTotalSamples);
+                const minSyncDur = Math.floor(4 * samplesPerMs);
+                const maxSyncDur = Math.floor(15 * samplesPerMs);
+                
+                let inSync = false;
+                let syncStartIdx = 0;
+                let firstSyncFound = -1;
+                
+                for (let i = searchStart; i < searchEnd; i += Math.floor(samplesPerMs)) {
+                    const freq = getLiveFreqAt(i);
+                    
+                    if (freq > 1100 + liveDopplerOffset && freq < 1300 + liveDopplerOffset) {
+                        if (!inSync) {
+                            syncStartIdx = i;
+                            inSync = true;
+                        }
+                    } else {
+                        if (inSync) {
+                            const duration = i - syncStartIdx;
+                            if (duration >= minSyncDur && duration <= maxSyncDur) {
+                                firstSyncFound = syncStartIdx;
+                                liveLog('Premier sync trouvé à ' + (syncStartIdx / sampleRate * 1000).toFixed(2) + 'ms');
+                                break;
+                            }
+                            inSync = false;
+                        }
+                    }
+                }
+                
+                if (firstSyncFound > 0) {
+                    liveImageStartIdx = firstSyncFound;
+                } else {
+                    liveImageStartIdx = theoreticalStart;
+                    liveLog('Sync non trouvé, utilisation du start théorique');
+                }
+                
+                liveCurrentLine = 0;
+                liveChromaU = []; liveChromaV = [];
+                prepareLiveCanvas();
+                setLiveState('receiving');
+                liveLog('Réception de l\'image...');
+            }
+        }
+    }
+    
+    function decodeLiveLines() {
+        if (!liveCurrentMode) return;
+        const mode = SSTV_MODES[liveCurrentMode];
+        const samplesPerMs = sampleRate / 1000;
+        const lineDur = getLiveLineDuration(mode);
+        const samplesPerLine = Math.floor(lineDur * samplesPerMs);
+        const totalLines = mode.lineSequence === 'pd' ? Math.floor(mode.height / 2) : mode.height;
+        
+        const available = liveTotalSamples - liveImageStartIdx;
+        const availableLines = Math.floor(available / samplesPerLine);
+        
+        while (liveCurrentLine < availableLines && liveCurrentLine < totalLines) {
+            const lineStart = liveImageStartIdx + liveCurrentLine * samplesPerLine;
+            const bufStart = liveTotalSamples - LIVE_BUFFER_SIZE;
+            if (lineStart < bufStart) { liveCurrentLine++; continue; }
+            
+            decodeLiveOneLine(liveCurrentLine, mode, lineStart);
+            liveCurrentLine++;
+            
+            const progress = (liveCurrentLine / totalLines) * 100;
+            document.getElementById('liveProgressFill').style.width = progress + '%';
+            document.getElementById('liveStatLine').textContent = 
+                mode.lineSequence === 'pd' ? (liveCurrentLine*2) + '/' + mode.height : liveCurrentLine + '/' + mode.height;
+        }
+        
+        if (liveCurrentLine >= totalLines) {
+            liveLog('Image complète!');
+            document.getElementById('liveSaveBtn').disabled = false;
+            setLiveState('listening');
+            resetLiveVIS();
+        }
+    }
+    
+    function getLiveLineDuration(mode) {
+        switch (mode.lineSequence) {
+            case 'pd': return mode.syncMs + mode.porchMs + mode.scanMs * 4;
+            case 'robot': return mode.syncMs + mode.porchMs + mode.scanMs + (mode.separatorMs||0) + (mode.chromaPorchMs||0) + (mode.chromaMs||0);
+            case 'martin': return mode.syncMs + mode.porchMs + mode.scanMs * 3 + mode.separatorMs * 3;
+            case 'scottie': return mode.separatorMs * 2 + mode.scanMs * 3 + mode.syncMs + mode.porchMs;
+        }
+        return 100;
+    }
+    
+    function decodeLivePixels(startIdx, durationMs, numPixels) {
+        const samplesPerMs = sampleRate / 1000;
+        const total = Math.floor(durationMs * samplesPerMs);
+        const perPixel = total / numPixels;
+        const pixels = new Uint8Array(numPixels);
+        
+        for (let px = 0; px < numPixels; px++) {
+            const pxStart = Math.floor(startIdx + px * perPixel);
+            const pxEnd = Math.floor(startIdx + (px + 1) * perPixel);
+            
+            let sum = 0, n = 0;
+            for (let i = pxStart; i < pxEnd; i++) {
+                sum += getLiveFreqAt(i); n++;
+            }
+            
+            const avg = n > 0 ? sum / n : 1500;
+            const norm = (avg - liveDopplerOffset - FREQ.BLACK) / FREQ.RANGE;
+            pixels[px] = Math.max(0, Math.min(255, Math.round(norm * 255)));
+        }
+        return pixels;
+    }
+    
+    function decodeLiveOneLine(lineNum, mode, lineStart) {
+        const samplesPerMs = sampleRate / 1000;
+        
+        switch (mode.lineSequence) {
+            case 'pd': {
+                const sync = Math.floor(mode.syncMs * samplesPerMs);
+                const porch = Math.floor(mode.porchMs * samplesPerMs);
+                const scan = Math.floor(mode.scanMs * samplesPerMs);
+                
+                const y0 = lineStart + sync + porch;
+                const ry = y0 + scan;
+                const by = ry + scan;
+                const y1 = by + scan;
+                
+                const Y0 = decodeLivePixels(y0, mode.scanMs, mode.width);
+                const RY = decodeLivePixels(ry, mode.scanMs, mode.width);
+                const BY = decodeLivePixels(by, mode.scanMs, mode.width);
+                const Y1 = decodeLivePixels(y1, mode.scanMs, mode.width);
+                
+                drawLiveLineYUV(lineNum * 2, Y0, BY, RY, mode.width);
+                if (lineNum * 2 + 1 < mode.height) drawLiveLineYUV(lineNum * 2 + 1, Y1, BY, RY, mode.width);
+                break;
+            }
+            case 'robot': {
+                const sync = Math.floor(mode.syncMs * samplesPerMs);
+                const porch = Math.floor(mode.porchMs * samplesPerMs);
+                const scan = Math.floor(mode.scanMs * samplesPerMs);
+                const sep = Math.floor((mode.separatorMs||0) * samplesPerMs);
+                const cporch = Math.floor((mode.chromaPorchMs||0) * samplesPerMs);
+                
+                const yStart = lineStart + sync + porch;
+                const Y = decodeLivePixels(yStart, mode.scanMs, mode.width);
+                
+                let U, V;
+                if (mode.chromaMs) {
+                    const cStart = yStart + scan + sep + cporch;
+                    const C = decodeLivePixels(cStart, mode.chromaMs, mode.width);
+                    if (lineNum % 2 === 0) {
+                        V = C; liveChromaV[lineNum] = V;
+                        U = liveChromaU[lineNum-1] || new Uint8Array(mode.width).fill(128);
+                    } else {
+                        U = C; liveChromaU[lineNum] = U;
+                        V = liveChromaV[lineNum-1] || new Uint8Array(mode.width).fill(128);
+                    }
+                } else {
+                    U = new Uint8Array(mode.width).fill(128);
+                    V = new Uint8Array(mode.width).fill(128);
+                }
+                drawLiveLineYUV(lineNum, Y, U, V, mode.width);
+                break;
+            }
+            case 'martin': {
+                const sync = Math.floor(mode.syncMs * samplesPerMs);
+                const porch = Math.floor(mode.porchMs * samplesPerMs);
+                const scan = Math.floor(mode.scanMs * samplesPerMs);
+                const sep = Math.floor(mode.separatorMs * samplesPerMs);
+                
+                const g = lineStart + sync + porch;
+                const b = g + scan + sep;
+                const r = b + scan + sep;
+                
+                const G = decodeLivePixels(g, mode.scanMs, mode.width);
+                const B = decodeLivePixels(b, mode.scanMs, mode.width);
+                const R = decodeLivePixels(r, mode.scanMs, mode.width);
+                drawLiveLineRGB(lineNum, R, G, B, mode.width);
+                break;
+            }
+            case 'scottie': {
+                const sync = Math.floor(mode.syncMs * samplesPerMs);
+                const porch = Math.floor(mode.porchMs * samplesPerMs);
+                const scan = Math.floor(mode.scanMs * samplesPerMs);
+                const sep = Math.floor(mode.separatorMs * samplesPerMs);
+                
+                const g = lineStart + sep;
+                const b = g + scan + sep;
+                const r = b + scan + sync + porch;
+                
+                const G = decodeLivePixels(g, mode.scanMs, mode.width);
+                const B = decodeLivePixels(b, mode.scanMs, mode.width);
+                const R = decodeLivePixels(r, mode.scanMs, mode.width);
+                drawLiveLineRGB(lineNum, R, G, B, mode.width);
+                break;
+            }
+        }
+    }
+    
+    // ==========================================================================
+    // LIVE CANVAS DRAWING
+    // ==========================================================================
+    
+    function prepareLiveCanvas() {
+        const mode = SSTV_MODES[liveCurrentMode];
+        const canvas = document.getElementById('liveCanvas');
+        canvas.width = mode.width;
+        canvas.height = mode.height;
+        liveMainCtx = canvas.getContext('2d');
+        liveImageData = liveMainCtx.createImageData(mode.width, mode.height);
+        for (let i = 3; i < liveImageData.data.length; i += 4) liveImageData.data[i] = 255;
+        liveMainCtx.putImageData(liveImageData, 0, 0);
+    }
+    
+    function drawLiveLineYUV(line, Y, U, V, w) {
+        if (!liveImageData || line >= liveImageData.height) return;
+        for (let x = 0; x < w; x++) {
+            const y = Y[x], u = U[x] - 128, v = V[x] - 128;
+            const idx = (line * w + x) * 4;
+            liveImageData.data[idx] = Math.max(0, Math.min(255, Math.round(y + 1.402*v)));
+            liveImageData.data[idx+1] = Math.max(0, Math.min(255, Math.round(y - 0.344*u - 0.714*v)));
+            liveImageData.data[idx+2] = Math.max(0, Math.min(255, Math.round(y + 1.772*u)));
+        }
+        liveMainCtx.putImageData(liveImageData, 0, 0);
+    }
+    
+    function drawLiveLineRGB(line, R, G, B, w) {
+        if (!liveImageData || line >= liveImageData.height) return;
+        for (let x = 0; x < w; x++) {
+            const idx = (line * w + x) * 4;
+            liveImageData.data[idx] = R[x];
+            liveImageData.data[idx+1] = G[x];
+            liveImageData.data[idx+2] = B[x];
+        }
+        liveMainCtx.putImageData(liveImageData, 0, 0);
+    }
+    
+    function clearLiveImage() {
+        const canvas = document.getElementById('liveCanvas');
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        document.getElementById('liveProgressFill').style.width = '0%';
+        document.getElementById('liveSaveBtn').disabled = true;
+        resetLiveDecoder();
+    }
+    
+    function saveLiveImage() {
+        const canvas = document.getElementById('liveCanvas');
+        const link = document.createElement('a');
+        link.download = 'sstv_live_' + (liveCurrentMode || 'image') + '_' + Date.now() + '.png';
+        link.href = canvas.toDataURL('image/png');
+        link.click();
+    }
+    
+    // ==========================================================================
+    // LIVE UTILITIES
+    // ==========================================================================
+    
+    function setLiveState(s) {
+        liveState = s;
+        document.getElementById('liveStatState').textContent = s.toUpperCase();
+    }
+    
+    function resetLiveVIS() {
+        liveVisState = 'searching';
+        liveLeaderStartIdx = -1;
+        liveLeaderCount = 0;
+        liveVisBits = [];
+        liveLastDebugLog = 0;
+        liveLastScanIdx = 0;
+    }
+    
+    function resetLiveDecoder() {
+        resetLiveVIS();
+        liveCurrentMode = null;
+        liveCurrentLine = 0;
+        liveChromaU = []; liveChromaV = [];
+        document.getElementById('liveStatMode').textContent = '--';
+        document.getElementById('liveStatLine').textContent = '--';
+    }
+    
+    function liveLog(msg) {
+        const logDiv = document.getElementById('liveDebugLog');
+        const time = new Date().toISOString().substr(11, 8);
+        logDiv.innerHTML += '[' + time + '] ' + msg + '<br>';
+        logDiv.scrollTop = logDiv.scrollHeight;
+        console.log('[LIVE] ' + msg);
+    }
+    
+    function updateLiveVisuals() {
+        if (!liveAnalyserNode) return;
+        
+        const data = new Uint8Array(liveAnalyserNode.frequencyBinCount);
+        liveAnalyserNode.getByteFrequencyData(data);
+        
+        let sum = 0;
+        for (let i = 0; i < data.length; i++) sum += data[i];
+        const avg = sum / data.length;
+        document.getElementById('levelMeter').style.width = Math.min(100, avg / 128 * 100) + '%';
+    }
+    
+    </script>
+</body>
+</html>
