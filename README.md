@@ -6,6 +6,9 @@
 
 **Slow Scan Television encoder and decoder** — Transmit and receive images over audio, browser-based.
 
+
+▶️ [Lancer l'application](index2.html)
+
 ![Screenshot](screenshot.png)
 
 ## 🚀 Features
@@ -45,5 +48,6 @@ SSTV is used by amateur radio operators to transmit images over HF/VHF frequenci
 MIT
 
 ## 👤 Author
+
 
 **Eric PERRET** — [GitHub](https://github.com/ericperret)
