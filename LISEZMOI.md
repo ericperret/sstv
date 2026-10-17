@@ -1,50 +1,78 @@
+<!--
+  Nom      : LISEZMOI.md
+  Objet    : Présentation du dépôt sstv (émission, réception et diagnostic SSTV)
+  Auteur   : Eric PERRET
+  Date     : 2026-10-17
+  Licence  : CC BY-NC 4.0
+-->
+
 # 📻 SSTV
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](#)
-[![Pure HTML/JS](https://img.shields.io/badge/Pure-HTML%2FJS-blue.svg)](#)
-[![Ham Radio](https://img.shields.io/badge/Domain-Ham%20Radio-green.svg)](#)
+🇬🇧 [English version: README.md](README.md)
 
-**Encodeur et décodeur Slow Scan Television** — Transmettre et recevoir des images par audio, dans le navigateur.
+Télévision à balayage lent (SSTV) dans le navigateur : émission d'une image en fichier audio, décodage d'un fichier ou du son en direct, diagnostic d'un enregistrement. Trois fichiers HTML autonomes, aucune librairie, aucune installation. Interfaces en français (diagnostic en anglais).
 
-![Screenshot](screenshot.png)
+▶️ **[Page d'accueil des outils](https://ericperret.github.io/sstv/index2.html)**
 
-## 🚀 Fonctionnalités
+| Outil | Lancer |
+|---|---|
+| Émetteur SSTV multi-mode v4 | ▶️ **[sstv_tx_multimode_v4.html](https://ericperret.github.io/sstv/sstv_tx_multimode_v4.html)** |
+| SSTV Decoder Ultimate | ▶️ **[sstv_decoder_ultimate.html](https://ericperret.github.io/sstv/sstv_decoder_ultimate.html)** |
+| SSTV Diagnostic | ▶️ **[sstv_diagnostic.html](https://ericperret.github.io/sstv/sstv_diagnostic.html)** |
 
-- **Mode TX** — Encoder des images en signaux audio SSTV
-- **Mode RX** — Décoder l'audio SSTV en images
-- **Formats Multiples** — Modes Martin, Scottie, Robot
-- **Web Audio API** — Traitement audio temps réel
-- **Entrée Microphone** — Décoder des signaux en direct
-- **Sortie Haut-parleur** — Transmettre via audio
+---
 
-## 🛠️ Technologies
+## Émetteur SSTV multi-mode v4
 
-- HTML/CSS/JavaScript pur
-- Web Audio API pour le traitement du signal
-- Canvas pour la manipulation d'images
-- Aucune dépendance externe
+![Émetteur SSTV multi-mode v4](screenshot_sstv_tx_multimode_v4.png)
 
-## 📖 Utilisation
+| Fonction | Description |
+|---|---|
+| Image | Chargement d'une image, mise à l'échelle du mode choisi |
+| Modes | Robot36 couleur et N&B, Robot72, Martin M1 / M2, Scottie S1 / S2, PD120, PD180 (durée affichée) |
+| Signal | Échantillonnage 44,1 / 48 / 22,05 kHz, filtre passe-bas, lissage des transitions de ligne |
+| En-tête | Code VIS (auto-détection à la réception), mire de calibration 1 s à 1 900 Hz |
+| Sortie | Fichier WAV téléchargé, à diffuser par un émetteur ou un haut-parleur |
 
-### Transmettre (TX)
-1. Charger une image
-2. Sélectionner le mode SSTV (Martin M1, Scottie S1, etc.)
-3. Cliquer sur transmettre — l'audio joue par les haut-parleurs
+## SSTV Decoder Ultimate
 
-### Recevoir (RX)
-1. Autoriser l'accès au microphone
-2. Jouer l'audio SSTV près du microphone
-3. Observer l'image se décoder ligne par ligne
+![SSTV Decoder Ultimate](screenshot_sstv_decoder_ultimate.png)
 
-## 🎓 Radio Amateur
+| Fonction | Description |
+|---|---|
+| Sources | Fichier WAV, ou audio en direct (micro, autorisation demandée) |
+| Modes | Détection automatique par code VIS, ou forcé : Robot36 / 72, Martin M1 / M2, Scottie S1 / S2, PD90 à PD240 |
+| Synchronisation | PLL sur les impulsions de synchronisation, AFC automatique, décalage Doppler manuel, correction d'inclinaison (slant) |
+| Analyse | Analyse du signal, affichage de l'image au fil du décodage, journal de débogage |
+| Sortie | Export PNG de l'image décodée |
 
-Le SSTV est utilisé par les radioamateurs pour transmettre des images sur les fréquences HF/VHF. Cet outil permet d'expérimenter sans licence radio en utilisant des câbles audio ou un couplage acoustique.
+## SSTV Diagnostic
 
-## 📄 Licence
+![SSTV Diagnostic](screenshot_sstv_diagnostic.png)
 
-MIT
+| Fonction | Description |
+|---|---|
+| Entrée | Fichier WAV |
+| Recherches | Code VIS, impulsions de synchronisation, mesure de la durée de ligne |
+| Tracé | Fréquence instantanée, mesure au clic |
+| Résultats | Marqueurs détectés, analyse des temps, journal |
 
-## 👤 Auteur
+---
+
+## Radioamateurisme
+
+La SSTV sert aux radioamateurs pour transmettre des images en HF / VHF. Ces outils permettent d'expérimenter sans émetteur, par câble audio ou couplage acoustique ; l'émission sur les bandes radioamateurs reste soumise à licence.
+
+## Historique
+
+| Version | Évolution |
+|---|---|
+| 2026-10-17 | Fichiers renommés sans suffixe de copie, cartouches, page d'accueil corrigée, README / LISEZMOI réécrits |
+
+## Licence
+
+[CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/deed.fr) — voir [LICENSE (CC BY-NC 4.0)](<LICENSE (CC BY-NC 4.0)>).
+
+## Auteur
 
 **Eric PERRET** — [GitHub](https://github.com/ericperret)
-`
