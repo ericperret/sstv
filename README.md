@@ -3,7 +3,7 @@
   Purpose  : Overview of the sstv repository (SSTV transmission, reception and diagnosis)
   Author   : Eric PERRET
   Date     : 2026-10-17
-  Version  : 1.4
+  Version  : 1.5
   License  : CC BY-NC 4.0
 -->
 
@@ -73,6 +73,7 @@ SSTV is used by radio amateurs to send images over HF / VHF. These tools let you
 | 2026-10-17 | Decoder 1.2: live microphone reception on the same decoding chain as files (Robot36 VIS, sync tracking, measured clock), tested on simulated acoustic coupling |
 | 2026-10-17 | Decoder 1.3: microphone left at its default settings (browser processing off only on request), level meter in dBFS, recording of the microphone capture to WAV |
 | 2026-10-17 | Decoder 1.4: no log displayed; microphone tab simplified: Robot36 only, start on regular sync pulses (VIS optional), touch-friendly audio processing toggle usable during capture, level meter -90 to 0 dBFS, capture recording below the image |
+| 2026-10-17 | Decoder 1.5: microphone reception starts on START without waiting for VIS or sync, runs continuously until STOP (images follow one another), locks on the first sync found; a Robot36 VIS realigns the image to the top |
 
 ## License
 

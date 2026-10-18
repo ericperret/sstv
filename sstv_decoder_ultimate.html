@@ -6,7 +6,7 @@
                détection VIS, PLL, AFC, correction Doppler et d'inclinaison,
                modes Robot, Martin, Scottie, PD ; export PNG
   Auteur     : Eric PERRET
-  Version    : 1.4
+  Version    : 1.5
   Date       : 2026-10-17
   Plateforme : HTML / CSS / JavaScript, Web Audio, fichier unique, aucune librairie
   Historique :
@@ -35,13 +35,18 @@
                      bouton bascule des traitements audio actif pendant la
                      capture, jauge -90 à 0 dBFS (zone utile -60 à -20),
                      enregistrement de la capture sous l'image
+    1.5 (2026-10-17) micro : réception lancée au clic sur START, sans attendre
+                     ni VIS ni synchro, en continu jusqu'à STOP (chaque image
+                     de 240 lignes enchaîne sur la suivante) ; accrochage sur
+                     la première synchro trouvée, puis suivi ±4 ms ; un VIS
+                     Robot36 recale l'image en haut
 ================================================================================
 -->
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Décodeur SSTV v1.4</title>
+    <title>Décodeur SSTV v1.5</title>
     <style>
         body {
             font-family: 'Consolas', 'Monaco', monospace;
@@ -267,7 +272,7 @@
 <body>
     <div class="container">
         <h1>📡 SSTV Decoder Ultimate</h1>
-        <p class="subtitle">Version 1.4 — Fichier WAV et micro en direct</p>
+        <p class="subtitle">Version 1.5 — Fichier WAV et micro en direct</p>
         
         <!-- TABS -->
         <div class="tabs" style="display:flex;gap:5px;margin-bottom:15px;">
@@ -1890,8 +1895,7 @@
         return out;
     };
     
-    const LIVE_IDLE_SECONDS = 60;        // mémoire gardée en écoute
-    const LIVE_MAX_MISSES = 20;          // synchros manquées de suite : fin d'image
+    const LIVE_KEEP_SECONDS = 2;         // mémoire gardée avant chaque nouvelle image
     
     const WORKLET_SOURCE = `
         class SstvTap extends AudioWorkletProcessor {
@@ -1975,7 +1979,9 @@
         liveTrack = new FreqTrack(rate, rate * 20);
         liveVisFrom = 0;
         liveRx = null;
-        setLiveState('listening');
+        liveMainCtx = null;
+        setLiveState('receiving');
+        liveStartImage(LIVE_MODE, 0, false);
     }
     
     // Ouverture du micro (réglages par défaut, ou traitements coupés sur demande)
@@ -2047,7 +2053,7 @@
         if (liveTapNode) { try { liveTapNode.disconnect(); } catch (e) {} liveTapNode = null; }
         if (liveAudioContext) { liveAudioContext.close(); liveAudioContext = null; }
         if (liveWakeLock) { liveWakeLock.release(); liveWakeLock = null; }
-        if (liveRx) liveFinishImage('arrêt');
+        if (liveRx) liveFinishImage();
         if (liveRecord) saveLiveRecord();
         document.getElementById('liveRecordBtn').disabled = true;
         
@@ -2077,72 +2083,16 @@
         }
         liveTrack.push(liveDemod.process(samples));
         
-        if (liveState === 'receiving') liveWatchVIS();
-        if (liveState === 'listening') liveListen();
-        if (liveState === 'receiving') liveReceive();
+        if (liveState === 'receiving') {
+            liveWatchVIS();
+            liveReceiveRobot(liveRx);
+        }
     }
     
     // ==========================================================================
-    // ÉCOUTE : VIS, ou synchros régulières si un mode est forcé
+    // RÉCEPTION EN CONTINU : l'image démarre au clic sur START, chaque image
+    // de 240 lignes enchaîne sur la suivante jusqu'à STOP
     // ==========================================================================
-    
-    function liveListen() {
-        const spm = liveRate / 1000;
-        const mode = SSTV_MODES[LIVE_MODE];
-        
-        // Mémoire bornée en écoute
-        if (liveTrack.len > LIVE_IDLE_SECONDS * liveRate) {
-            const shift = liveTrack.keepTail(5);
-            liveVisFrom = Math.max(0, liveVisFrom - shift);
-        }
-        
-        const to = liveTrack.len - Math.ceil(320 * spm);
-        if (to <= liveVisFrom) return;
-        
-        // VIS Robot36 s'il passe ; sinon trois synchros régulières
-        const vis = findVIS(liveTrack, liveVisFrom, to, liveDopplerOffset, liveLog);
-        if (vis && vis.visCode === mode.visCode) {
-            liveVisFrom = vis.imageStart;
-            liveStartImage(LIVE_MODE, vis.imageStart, true);
-            return;
-        }
-        const start = findRobotStart(liveTrack, mode, liveVisFrom, to);
-        if (start >= 0) {
-            liveVisFrom = start;
-            liveStartImage(LIVE_MODE, start, false);
-            return;
-        }
-        // Reprise là où la recherche de synchros s'est arrêtée (3 lignes avant la fin)
-        const syncLimit = liveTrack.len - Math.ceil((3 * robotLineMs(mode) + 10) * spm);
-        liveVisFrom = Math.max(liveVisFrom, Math.min(to, syncLimit));
-    }
-    
-    // Synchro franche : 1200 Hz avant la fin de synchro, palier 1500 Hz après
-    function isCleanSync(track, pos, mode) {
-        const spm = track.rate / 1000;
-        const sync = track.mean(pos - (mode.syncMs - 1) * spm, pos - 1 * spm) - liveDopplerOffset;
-        const porch = track.mean(pos + 0.5 * spm, pos + (mode.porchMs - 0.5) * spm) - liveDopplerOffset;
-        return Math.abs(sync - 1200) < 100 && Math.abs(porch - 1500) < 150;
-    }
-    
-    // Sans VIS : quatre synchros franches espacées d'une ligne (±1 ms)
-    function findRobotStart(track, mode, from, to) {
-        const spm = track.rate / 1000;
-        const T = robotLineMs(mode) * spm;
-        const last = Math.min(to, track.len - 3 * T - 5 * spm);
-        for (let e = Math.max(from, 10 * spm); e < last; e += 3 * spm) {
-            let p = findSyncEnd(track, e, 1.5, mode.syncMs, liveDopplerOffset);
-            if (p < 0 || !isCleanSync(track, p, mode)) continue;
-            const first = p;
-            let ok = true;
-            for (let n = 1; n < 4 && ok; n++) {
-                p = findSyncEnd(track, p + T, 1, mode.syncMs, liveDopplerOffset);
-                ok = p >= 0 && isCleanSync(track, p, mode);
-            }
-            if (ok) return Math.round(first - mode.syncMs * spm);
-        }
-        return -1;
-    }
     
     // Pendant une réception : un VIS Robot36 annonce une nouvelle image
     function liveWatchVIS() {
@@ -2152,7 +2102,7 @@
         const vis = findVIS(liveTrack, liveVisFrom, to, liveDopplerOffset, liveLog);
         liveVisFrom = vis ? vis.imageStart : to;
         if (vis && vis.visCode === SSTV_MODES[LIVE_MODE].visCode && liveRx && vis.imageStart > liveRx.start + spm * 1000) {
-            liveFinishImage('nouveau VIS');
+            liveFinishImage();
             liveStartImage(LIVE_MODE, vis.imageStart, true);
         }
     }
@@ -2160,41 +2110,45 @@
     function liveStartImage(modeName, start, fromVIS) {
         const mode = SSTV_MODES[modeName];
         const spm = liveRate / 1000;
+        
+        // Mémoire : on ne garde que l'image en cours et un peu avant
+        const from = Math.max(0, Math.floor(start - LIVE_KEEP_SECONDS * liveRate));
+        if (from > 0) {
+            const shift = liveTrack.keepTail((liveTrack.len - from) / liveRate);
+            start -= shift;
+            liveVisFrom = Math.max(0, liveVisFrom - shift);
+        }
+        
         liveRx = {
-            modeName, mode, start, fromVIS,
-            line: 0, misses: 0, points: [], lines: [],
+            mode, start, fromVIS,
+            line: 0, points: [], lines: [], lastFound: -100,
             expected: start + mode.syncMs * spm
         };
-        liveLog(`${fromVIS ? 'VIS' : 'Synchro'} : ${mode.name}, début à ${(start / liveRate).toFixed(3)}s`);
-        prepareLiveCanvas(mode);
-        setLiveState('receiving');
+        if (!liveMainCtx) prepareLiveCanvas(mode);   // l'image suivante écrase la précédente ligne à ligne
+        liveLog(`${fromVIS ? 'VIS' : 'Départ'} : ${mode.name} à ${(start / liveRate).toFixed(3)}s`);
     }
     
-    // ==========================================================================
-    // RÉCEPTION
-    // ==========================================================================
-    
-    function liveReceive() {
-        const rx = liveRx;
-        if (!rx) return;
-        if (rx.mode.lineSequence === 'robot') liveReceiveRobot(rx);
-        else liveReceiveFixed(rx);
-    }
-    
-    // Robot : fin de synchro suivie ligne par ligne, horloge mesurée en continu
+    // Robot : fin de synchro recherchée à chaque ligne. Sans synchro récente,
+    // recherche sur toute la ligne (accrochage) ; accroché, ±4 ms. Sans
+    // synchro, la ligne avance au rythme nominal. Horloge mesurée sur les
+    // synchros trouvées depuis l'accrochage.
     function liveReceiveRobot(rx) {
         const mode = rx.mode;
         const spm = liveRate / 1000;
         const T = robotLineMs(mode) * spm;
         
-        while (rx.line < mode.height) {
-            // Données nécessaires : fin de la ligne + fenêtre de recherche
-            if (liveTrack.len < rx.expected + T + 6 * spm) return;
+        while (liveRx === rx) {
+            const locked = rx.line - rx.lastFound <= 3;
+            const win = locked ? 4 : robotLineMs(mode) / 2;
+            if (liveTrack.len < rx.expected + T + (win + 3) * spm) return;
             
             const line = rx.line;
-            const pos = findSyncEnd(liveTrack, rx.expected, line === 0 ? 20 : 4, mode.syncMs, liveDopplerOffset);
-            if (pos >= 0) { rx.points.push([line, pos]); rx.misses = 0; }
-            else rx.misses++;
+            const pos = findSyncEnd(liveTrack, rx.expected, win, mode.syncMs, liveDopplerOffset);
+            if (pos >= 0) {
+                if (!locked) rx.points = [];            // accrochage : nouvelle base de temps
+                rx.points.push([line, pos]);
+                rx.lastFound = line;
+            }
             
             let syncEnd, k = 1, next;
             if (rx.points.length >= 8) {
@@ -2213,107 +2167,47 @@
             
             rx.expected = next;
             rx.line++;
-            updateLiveProgress(rx.line, mode.height, mode.height);
+            updateLiveProgress(rx.line, mode.height);
             
-            if (rx.misses >= LIVE_MAX_MISSES) { liveFinishImage('signal perdu'); return; }
+            if (rx.line >= mode.height) {
+                liveFinishImage();
+                const n = liveRx;   // null sauf si STOP entre-temps
+                if (liveState === 'receiving' && !n) {
+                    liveStartImage(LIVE_MODE, Math.round(next - mode.syncMs * spm), false);
+                    liveRx.lastFound = rx.lastFound - rx.line;   // accrochage conservé
+                    liveRx.points = [];
+                }
+                return;
+            }
         }
-        liveMainCtx.putImageData(liveImageData, 0, 0);
-        liveFinishImage('image complète');
     }
     
-    // Autres modes : durée de ligne nominale depuis le début d'image
-    function liveReceiveFixed(rx) {
-        const mode = rx.mode;
-        const spm = liveRate / 1000;
-        const lineMs = getLiveLineDuration(mode);
-        const total = mode.lineSequence === 'pd' ? Math.floor(mode.height / 2) : mode.height;
-        
-        while (rx.line < total) {
-            const lineStart = rx.start + rx.line * lineMs * spm;
-            if (liveTrack.len < lineStart + lineMs * spm) return;
-            decodeLiveOneLine(rx.line, mode, lineStart);
-            rx.line++;
-            updateLiveProgress(rx.line, total, mode.height);
-        }
-        liveFinishImage('image complète');
-    }
-    
-    // Fin d'image : Robot redessiné avec l'horloge mesurée sur toute l'image
-    function liveFinishImage(reason) {
+    // Fin d'image : redessinée avec l'horloge mesurée sur toute l'image
+    function liveFinishImage() {
         const rx = liveRx;
         liveRx = null;
-        if (!rx) return;
+        if (!rx || !liveImageData) return;
         const mode = rx.mode;
         
-        if (mode.lineSequence === 'robot' && rx.points.length >= 8) {
+        if (rx.points.length >= 8) {
             const spm = liveRate / 1000;
             const T = robotLineMs(mode) * spm;
             const fit = fitLine(rx.points, spm);
+            const first = rx.points[0][0];          // lignes depuis l'accrochage
             const lines = [];
-            for (let line = 0; line < rx.line; line++) {
+            for (let line = first; line < rx.line; line++) {
                 lines[line] = robotReadLine(liveTrack, fit.a + fit.b * line, fit.b / T, mode, line, liveDopplerOffset);
             }
-            for (let line = 0; line < rx.line; line++) robotDrawLine(lines, line, mode, liveImageData.data);
-            liveLog(`Synchros : ${rx.points.length}/${rx.line}, période mesurée ${(fit.b / spm).toFixed(4)} ms (${((fit.b / T - 1) * 1e6).toFixed(0)} ppm)`);
+            for (let line = first; line < rx.line; line++) robotDrawLine(lines, line, mode, liveImageData.data);
+            liveLog(`Synchros : ${rx.points.length}/${rx.line}, période ${(fit.b / spm).toFixed(4)} ms`);
         }
         liveMainCtx.putImageData(liveImageData, 0, 0);
-        liveLog(`Fin d'image (${reason}) : ${rx.line} lignes`);
         document.getElementById('liveSaveBtn').disabled = false;
-        
-        if (liveState !== 'idle') {
-            // Écoute reprise après la dernière ligne reçue
-            liveVisFrom = Math.max(liveVisFrom, Math.floor(Math.min(rx.expected, liveTrack.len)));
-            setLiveState('listening');
-        }
     }
     
-    function updateLiveProgress(done, total, height) {
+    function updateLiveProgress(done, total) {
         document.getElementById('liveProgressFill').style.width = (done / total * 100) + '%';
         if (liveMainCtx && (done % 4 === 0 || done === total)) liveMainCtx.putImageData(liveImageData, 0, 0);
-    }
-    
-    function getLiveLineDuration(mode) {
-        switch (mode.lineSequence) {
-            case 'pd': return mode.syncMs + mode.porchMs + mode.scanMs * 4;
-            case 'robot': return robotLineMs(mode);
-            case 'martin': return mode.syncMs + mode.porchMs + mode.scanMs * 3 + mode.separatorMs * 3;
-            case 'scottie': return mode.separatorMs * 2 + mode.scanMs * 3 + mode.syncMs + mode.porchMs;
-        }
-        return 100;
-    }
-    
-    function decodeLiveOneLine(lineNum, mode, lineStart) {
-        const spm = liveRate / 1000;
-        const off = liveDopplerOffset;
-        const px = (start, ms) => readPixels(liveTrack, start, ms, mode.width, off);
-        
-        switch (mode.lineSequence) {
-            case 'pd': {
-                const y0 = lineStart + (mode.syncMs + mode.porchMs) * spm;
-                const ry = y0 + mode.scanMs * spm;
-                const by = ry + mode.scanMs * spm;
-                const y1 = by + mode.scanMs * spm;
-                const Y0 = px(y0, mode.scanMs), RY = px(ry, mode.scanMs);
-                const BY = px(by, mode.scanMs), Y1 = px(y1, mode.scanMs);
-                drawLiveLineYUV(lineNum * 2, Y0, BY, RY, mode.width);
-                if (lineNum * 2 + 1 < mode.height) drawLiveLineYUV(lineNum * 2 + 1, Y1, BY, RY, mode.width);
-                break;
-            }
-            case 'martin': {
-                const g = lineStart + (mode.syncMs + mode.porchMs) * spm;
-                const b = g + (mode.scanMs + mode.separatorMs) * spm;
-                const r = b + (mode.scanMs + mode.separatorMs) * spm;
-                drawLiveLineRGB(lineNum, px(r, mode.scanMs), px(g, mode.scanMs), px(b, mode.scanMs), mode.width);
-                break;
-            }
-            case 'scottie': {
-                const g = lineStart + mode.separatorMs * spm;
-                const b = g + (mode.scanMs + mode.separatorMs) * spm;
-                const r = b + (mode.scanMs + mode.syncMs + mode.porchMs) * spm;
-                drawLiveLineRGB(lineNum, px(r, mode.scanMs), px(g, mode.scanMs), px(b, mode.scanMs), mode.width);
-                break;
-            }
-        }
     }
     
     // ==========================================================================
@@ -2330,27 +2224,6 @@
         liveMainCtx.putImageData(liveImageData, 0, 0);
     }
     
-    function drawLiveLineYUV(line, Y, U, V, w) {
-        if (!liveImageData || line >= liveImageData.height) return;
-        for (let x = 0; x < w; x++) {
-            const y = Y[x], u = U[x] - 128, v = V[x] - 128;
-            const idx = (line * w + x) * 4;
-            liveImageData.data[idx] = Math.max(0, Math.min(255, Math.round(y + 1.402*v)));
-            liveImageData.data[idx+1] = Math.max(0, Math.min(255, Math.round(y - 0.344*u - 0.714*v)));
-            liveImageData.data[idx+2] = Math.max(0, Math.min(255, Math.round(y + 1.772*u)));
-        }
-    }
-    
-    function drawLiveLineRGB(line, R, G, B, w) {
-        if (!liveImageData || line >= liveImageData.height) return;
-        for (let x = 0; x < w; x++) {
-            const idx = (line * w + x) * 4;
-            liveImageData.data[idx] = R[x];
-            liveImageData.data[idx+1] = G[x];
-            liveImageData.data[idx+2] = B[x];
-        }
-    }
-    
     function clearLiveImage() {
         const canvas = document.getElementById('liveCanvas');
         const ctx = canvas.getContext('2d');
@@ -2358,7 +2231,12 @@
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         document.getElementById('liveProgressFill').style.width = '0%';
         document.getElementById('liveSaveBtn').disabled = true;
-        if (liveState === 'receiving') { liveRx = null; setLiveState('listening'); }
+        if (liveImageData) liveImageData.data.fill(0);
+        if (liveImageData) for (let i = 3; i < liveImageData.data.length; i += 4) liveImageData.data[i] = 255;
+        if (liveState === 'receiving' && liveRx) {
+            liveRx = null;
+            liveStartImage(LIVE_MODE, liveTrack.len, false);
+        }
     }
     
     function saveLiveImage() {
