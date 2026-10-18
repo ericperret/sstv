@@ -88,6 +88,7 @@ SSTV is used by radio amateurs to send images over HF / VHF. These tools let you
 | 2026-10-18 | In progress in dev/: decoder 1.10, B&W variant of every mode (same signal, luminance only: transmitted Y for Robot and PD, BT.601 luminance of R, G, B for Martin and Scottie), each mode followed by its B&W variant when tapping the image, B&W variants in the file mode selector; transmitter 4.3, non-standard "Robot36 B&W" removed |
 | 2026-10-18 | In progress in dev/: decoder 1.11, microphone state checked without a permission prompt: START greyed out when no microphone, access denied or non-secure page, reason shown on click and on start failure; capture falls back to ScriptProcessor when the AudioWorklet cannot load (page opened as a local file) |
 | 2026-10-18 | In progress in dev/: decoder 1.12 and transmitter 4.4, interface in French or English after the browser language (no setting); transmitter layout adapted to phones |
+| 2026-10-18 | AZS visual identity on all pages (stable and dev/): slate / amber / cyan palette, AZS band linking back to www.azs.fr, system fonts; no functional change; screenshots refreshed |
 
 ## License
 

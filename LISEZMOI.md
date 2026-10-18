@@ -88,6 +88,7 @@ La SSTV sert aux radioamateurs pour transmettre des images en HF / VHF. Ces outi
 | 2026-10-18 | En cours dans dev/ : décodeur 1.10, variante N&B de chaque mode (même signal, luminance seule : Y transmis pour Robot et PD, luminance BT.601 des voies R, V, B pour Martin et Scottie), chaque mode suivi de sa variante N&B au toucher de l'image, variantes N&B dans le sélecteur du mode fichier ; émetteur 4.3, « Robot36 N&B » non standard retiré |
 | 2026-10-18 | En cours dans dev/ : décodeur 1.11, état du micro vérifié sans demande d'autorisation : START grisé si micro absent, accès refusé ou page non sécurisée, raison affichée au clic et en cas d'échec au démarrage ; capture par ScriptProcessor si l'AudioWorklet ne se charge pas (page ouverte en fichier local) |
 | 2026-10-18 | En cours dans dev/ : décodeur 1.12 et émetteur 4.4, interface en français ou en anglais selon la langue du navigateur (aucun réglage) ; mise en page de l'émetteur adaptée au téléphone |
+| 2026-10-18 | Charte graphique AZS sur toutes les pages (stable et dev/) : palette ardoise / ambre / cyan, bandeau AZS avec lien de retour vers www.azs.fr, polices système ; aucun changement fonctionnel ; captures refaites |
 
 ## Licence
 

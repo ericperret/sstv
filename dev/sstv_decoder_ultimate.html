@@ -76,6 +76,9 @@
     1.12 (2026-10-18) interface en français ou en anglais selon la langue du
                      navigateur ; sélecteur du mode fichier construit à partir
                      de la table des modes
+    · (2026-10-18) charte graphique AZS : palette ardoise / ambre / cyan,
+                     bandeau AZS avec lien de retour vers www.azs.fr, polices
+                     système ; aucun changement fonctionnel
 ================================================================================
 -->
 <html lang="fr">
@@ -272,17 +275,56 @@
             color: #00ff00;
             padding: 5px;
         }
+            /* ---------- charte AZS (www.azs.fr) ---------- */
+        :root { color-scheme: dark; }
+        body { font-family: system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif; background: #0e1418; color: #dfe7ec; }
+        h1 { color: #dfe7ec; text-shadow: none; letter-spacing: -.3px; }
+        .subtitle { color: #8fa1ad; font: 12px ui-monospace,"SFMono-Regular",Menlo,Consolas,"Liberation Mono",monospace; }
+        .control-group, .panel { background: #141c22; border: 1px solid #26343e; border-radius: 8px; }
+        .control-group h3, .panel h3 { color: #dfe7ec; border-bottom-color: #26343e; display: flex; align-items: center; gap: 8px; }
+        .control-group h3::before, .panel h3::before { content: ""; width: 3px; height: 1em; border-radius: 2px; background: #f0a63a; flex: none; }
+        label { color: #a9b7bf; }
+        input[type="file"], select { border: 1px solid #33434e; background: #18222a; color: #dfe7ec; border-radius: 6px; font-family: system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif; }
+        input[type="file"]::file-selector-button { background: #141c22; color: #dfe7ec; border: 1px solid #33434e; border-radius: 4px; padding: 4px 10px; margin-right: 8px; }
+        input[type="range"], input[type="checkbox"], .zoom-controls input[type="range"] { accent-color: #f0a63a; }
+        input[type="number"] { background: #141c22; border: 1px solid #26343e; color: #dfe7ec; border-radius: 6px; font-family: ui-monospace,"SFMono-Regular",Menlo,Consolas,"Liberation Mono",monospace; }
+        input:focus, select:focus { outline: 2px solid #f0a63a; outline-offset: -1px; }
+        .progress-bar { background: #141c22; border: 1px solid #26343e; }
+        .progress-fill { background: linear-gradient(90deg, #5cc8d6, #f0a63a); }
+        .info { background: #141c22; border-left: 3px solid #5cc8d6; color: #dfe7ec; }
+        .warning { background: rgba(240,166,58,.08); border-left-color: #f0a63a; }
+        .warn { color: #f0a63a; }
+        .error { background: rgba(248,81,73,.08); color: #ff7b72; border-left: 3px solid #f85149; }
+        table, #measure, .level-scale, td.num { font-family: ui-monospace,"SFMono-Regular",Menlo,Consolas,"Liberation Mono",monospace; }
+        td, th, table.results td, table.results th { border-color: #26343e; }
+        th, table.results th { background: #141c22; color: #8fa1ad; font-weight: 600; }
+        .azs-barre{display:flex;align-items:center;gap:12px;padding:8px 14px;margin:0 0 16px;background:#141c22;border:1px solid #26343e;border-radius:8px;
+            font:600 11px/1 ui-monospace,"SFMono-Regular",Menlo,Consolas,"Liberation Mono",monospace;letter-spacing:.06em;text-transform:uppercase;color:#8fa1ad}
+        .azs-barre .azs{font:800 20px/1 ui-monospace,"SFMono-Regular",Menlo,Consolas,"Liberation Mono",monospace;letter-spacing:-1px;text-transform:none;color:#f0a63a;text-decoration:none;padding-right:12px;border-right:1px solid #26343e}
+        .azs-barre .azs:hover{color:#ffcf7a}
+        .azs-barre a.fil{color:#8fa1ad;text-decoration:none}
+        .azs-barre a.fil:hover{color:#f0a63a}
+        .container { background: #18222a; border: 1px solid #26343e; border-radius: 8px; box-shadow: 0 1px 0 rgba(255,255,255,.03) inset, 0 10px 30px -18px rgba(0,0,0,.8); }
+        button { border: 1px solid #33434e; background: #18222a; color: #dfe7ec; border-radius: 6px; font-family: system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif; transition: border-color .15s, color .15s, background .15s; }
+        button:hover { background: #18222a; border-color: #f0a63a; color: #f0a63a; }
+        button:disabled, button:disabled:hover { border-color: #26343e; color: #4a5a65; background: #141c22; }
+        .toggle-btn[aria-pressed="true"] { background: #f0a63a; border-color: #f0a63a; color: #111; }
+        .detected-mode { color: #5cc8d6; }
+        .level-wrap { background: #141c22; border-color: #26343e; }
+        .plot, canvas.plot { border-color: #26343e; }
+        #canvas { border: 1px solid #26343e; box-shadow: 0 10px 30px -18px rgba(0,0,0,.8); }
     </style>
 </head>
 <body>
+    <nav class="azs-barre"><a class="azs" href="https://www.azs.fr/" title="www.azs.fr">AZS</a><a class="fil" href="https://github.com/ericperret/sstv">sstv · dev</a></nav>
     <div class="container">
         <h1 data-t="h1"></h1>
         <p class="subtitle" data-t="subtitle"></p>
         
         <!-- TABS -->
         <div class="tabs" style="display:flex;gap:5px;margin-bottom:15px;">
-            <button class="tab-btn active" onclick="switchTab('file')" data-t="tab_file" id="tabFile" style="padding:10px 25px;background:#0f0f18;border:2px solid #00ff00;color:#00ff00;cursor:pointer;border-radius:5px 5px 0 0;font-weight:bold;"></button>
-            <button class="tab-btn" onclick="switchTab('live')" data-t="tab_live" id="tabLive" style="padding:10px 25px;background:#0a0a10;border:2px solid #333;color:#888;cursor:pointer;border-radius:5px 5px 0 0;font-weight:bold;"></button>
+            <button class="tab-btn active" onclick="switchTab('file')" data-t="tab_file" id="tabFile" style="padding:10px 25px;background:#18222a;border:2px solid #f0a63a;color:#f0a63a;cursor:pointer;border-radius:5px 5px 0 0;font-weight:bold;"></button>
+            <button class="tab-btn" onclick="switchTab('live')" data-t="tab_live" id="tabLive" style="padding:10px 25px;background:#141c22;border:2px solid #26343e;color:#8fa1ad;cursor:pointer;border-radius:5px 5px 0 0;font-weight:bold;"></button>
         </div>
         
         <!-- FILE TAB -->
@@ -299,7 +341,7 @@
             <h3 id="imageTitle" data-t="h_image"></h3>
             <canvas id="canvas" width="320" height="240"></canvas>
             <div style="text-align:center;">
-                <button id="saveBtn" disabled style="border-color:#00ffff;color:#00ffff;" data-t="save_png"></button>
+                <button id="saveBtn" disabled style="border-color:#5cc8d6;color:#5cc8d6;" data-t="save_png"></button>
             </div>
         </div>
         
@@ -337,7 +379,7 @@
             <h3 data-t="h_capture"></h3>
             <div style="display:flex;justify-content:center;gap:15px;margin-bottom:15px;">
                 <button id="startLiveBtn" style="padding:15px 30px;font-size:16px;">▶ START</button>
-                <button id="stopLiveBtn" disabled style="padding:15px 30px;font-size:16px;border-color:#ff4444;color:#ff4444;">■ STOP</button>
+                <button id="stopLiveBtn" disabled style="padding:15px 30px;font-size:16px;border-color:#f85149;color:#f85149;">■ STOP</button>
             </div>
             <div id="micState" class="warn" style="display:none;text-align:center;margin:0 0 12px;"></div>
             <div style="display:flex;justify-content:center;gap:10px;flex-wrap:wrap;margin-bottom:12px;">
@@ -359,12 +401,12 @@
         
         <div class="control-group">
             <h3 id="liveModeTitle">🖼️ Robot36</h3>
-            <canvas id="liveCanvas" width="320" height="240" style="border:2px solid #00ff00;display:block;margin:10px auto;background:#000;box-shadow:0 0 20px rgba(0,255,0,0.3);cursor:pointer;touch-action:manipulation;"></canvas>
+            <canvas id="liveCanvas" width="320" height="240" style="border:1px solid #26343e;display:block;margin:10px auto;background:#000;box-shadow:0 10px 30px -18px rgba(0,0,0,.8);cursor:pointer;touch-action:manipulation;"></canvas>
             <div class="progress-bar">
                 <div class="progress-fill" id="liveProgressFill"></div>
             </div>
             <div style="text-align:center;margin-top:10px;">
-                <button id="liveSaveBtn" style="border-color:#00ffff;color:#00ffff;" data-t="save_png"></button>
+                <button id="liveSaveBtn" style="border-color:#5cc8d6;color:#5cc8d6;" data-t="save_png"></button>
                 <button id="liveClearBtn" data-t="clear"></button>
                 <button id="liveRecordBtn" disabled data-t="rec_start"></button>
             </div>
@@ -1583,12 +1625,12 @@
     function switchTab(tab) {
         document.getElementById('fileTabContent').style.display = tab === 'file' ? 'block' : 'none';
         document.getElementById('liveTabContent').style.display = tab === 'live' ? 'block' : 'none';
-        document.getElementById('tabFile').style.borderColor = tab === 'file' ? '#00ff00' : '#333';
-        document.getElementById('tabFile').style.color = tab === 'file' ? '#00ff00' : '#888';
-        document.getElementById('tabFile').style.background = tab === 'file' ? '#0f0f18' : '#0a0a10';
-        document.getElementById('tabLive').style.borderColor = tab === 'live' ? '#00ff00' : '#333';
-        document.getElementById('tabLive').style.color = tab === 'live' ? '#00ff00' : '#888';
-        document.getElementById('tabLive').style.background = tab === 'live' ? '#0f0f18' : '#0a0a10';
+        document.getElementById('tabFile').style.borderColor = tab === 'file' ? '#f0a63a' : '#26343e';
+        document.getElementById('tabFile').style.color = tab === 'file' ? '#f0a63a' : '#8fa1ad';
+        document.getElementById('tabFile').style.background = tab === 'file' ? '#18222a' : '#141c22';
+        document.getElementById('tabLive').style.borderColor = tab === 'live' ? '#f0a63a' : '#26343e';
+        document.getElementById('tabLive').style.color = tab === 'live' ? '#f0a63a' : '#8fa1ad';
+        document.getElementById('tabLive').style.background = tab === 'live' ? '#18222a' : '#141c22';
     }
     
     // ==========================================================================
