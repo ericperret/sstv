@@ -6,7 +6,7 @@
                détection VIS, PLL, AFC, correction Doppler et d'inclinaison,
                modes Robot, Martin, Scottie, PD ; export PNG
   Auteur     : Eric PERRET
-  Version    : 1.2
+  Version    : 1.3
   Date       : 2026-10-17
   Plateforme : HTML / CSS / JavaScript, Web Audio, fichier unique, aucune librairie
   Historique :
@@ -25,13 +25,17 @@
                      redessinée en fin de réception) ; décisions VIS par
                      médianes (robustes au bruit) ; affichage adapté au
                      téléphone, écran maintenu allumé pendant la capture
+    1.3 (2026-10-17) micro laissé dans ses réglages par défaut (traitements
+                     du navigateur coupés seulement sur demande) ; jauge de
+                     niveau en dBFS avec plage conseillée et saturation ;
+                     enregistrement de la capture micro en WAV
 ================================================================================
 -->
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Décodeur SSTV v1.2</title>
+    <title>Décodeur SSTV v1.3</title>
     <style>
         body {
             font-family: 'Consolas', 'Monaco', monospace;
@@ -96,6 +100,33 @@
         button:disabled:hover {
             background-color: #0a0a10;
             color: #333;
+        }
+        .level-wrap {
+            position: relative;
+            height: 24px;
+            background: #111;
+            border: 1px solid #333;
+            border-radius: 4px;
+            overflow: hidden;
+            margin: 10px 0 2px;
+        }
+        .level-zone {                     /* -30 à -6 dBFS sur une échelle -60 à 0 */
+            position: absolute; left: 50%; width: 40%; top: 0; bottom: 0;
+            background: rgba(0, 255, 0, 0.12);
+            border-left: 1px dashed #0a0; border-right: 1px dashed #a00;
+        }
+        .level-bar {
+            position: absolute; left: 0; top: 4px; bottom: 4px; width: 0%;
+            background: #00cc00;
+            transition: width 0.1s;
+        }
+        .level-peak {
+            position: absolute; top: 0; bottom: 0; width: 2px; left: 0;
+            background: #fff;
+        }
+        .level-scale {
+            display: flex; justify-content: space-between;
+            font-size: 10px; color: #666;
         }
         #canvas, #liveCanvas {
             width: 100%;
@@ -220,7 +251,7 @@
 <body>
     <div class="container">
         <h1>📡 SSTV Decoder Ultimate</h1>
-        <p class="subtitle">Version 1.2 — Fichier WAV et micro en direct</p>
+        <p class="subtitle">Version 1.3 — Fichier WAV et micro en direct</p>
         
         <!-- TABS -->
         <div class="tabs" style="display:flex;gap:5px;margin-bottom:15px;">
@@ -339,10 +370,22 @@
                 <button id="startLiveBtn" style="padding:15px 30px;font-size:16px;">▶ START</button>
                 <button id="stopLiveBtn" disabled style="padding:15px 30px;font-size:16px;border-color:#ff4444;color:#ff4444;">■ STOP</button>
             </div>
-            <div style="background:#111;border:1px solid #333;border-radius:4px;height:24px;overflow:hidden;margin:10px 0;">
-                <div id="levelMeter" style="height:100%;background:linear-gradient(90deg,#00ff00,#ffff00,#ff0000);width:0%;transition:width 0.1s;"></div>
+            <div class="level-wrap">
+                <div class="level-zone"></div>
+                <div id="levelMeter" class="level-bar"></div>
+                <div id="levelPeak" class="level-peak"></div>
             </div>
+            <div class="level-scale"><span>-60</span><span>-40</span><span>-30 ← niveau conseillé →</span><span>-6</span><span>0 dBFS</span></div>
+            <div id="levelText" style="font-size:13px;text-align:center;margin:4px 0 10px;">-- dBFS</div>
             <div id="liveSourceName" style="font-size:12px;color:#666;text-align:center;">-- Cliquez START pour commencer --</div>
+            <div style="margin-top:12px;font-size:13px;">
+                <label style="display:inline;"><input type="checkbox" id="liveRawAudio">
+                Couper les traitements audio du navigateur (écho, bruit, gain automatique)</label>
+            </div>
+            <div style="text-align:center;margin-top:10px;">
+                <button id="liveRecordBtn" disabled>⏺ Enregistrer la capture</button>
+                <div id="liveRecordInfo" style="font-size:12px;color:#888;margin-top:4px;"></div>
+            </div>
         </div>
         
         <div class="control-group">
@@ -1941,7 +1984,10 @@
     let liveDopplerOffset = 0;
     let liveVisFrom = 0;
     let liveRx = null;        // image en cours de réception
-    let liveLevel = 0;
+    let liveLevel = 0;        // efficace du dernier bloc
+    let livePeak = 0;         // crête du dernier bloc
+    let liveRecord = null;    // blocs bruts enregistrés, ou null
+    const LIVE_RECORD_MAX_SECONDS = 300;
     
     let liveMainCtx = null;
     let liveImageData = null;
@@ -1955,6 +2001,7 @@
     document.getElementById('stopLiveBtn').addEventListener('click', stopLiveAudio);
     document.getElementById('liveSaveBtn').addEventListener('click', saveLiveImage);
     document.getElementById('liveClearBtn').addEventListener('click', clearLiveImage);
+    document.getElementById('liveRecordBtn').addEventListener('click', toggleLiveRecord);
     document.getElementById('liveDopplerOffset').addEventListener('change', e => {
         liveDopplerOffset = parseFloat(e.target.value) || 0;
     });
@@ -1992,9 +2039,12 @@
         try {
             liveLog('Demande de permission audio...');
             
+            // Réglages par défaut du micro, sauf demande explicite
+            const raw = document.getElementById('liveRawAudio').checked;
             liveMediaStream = await navigator.mediaDevices.getUserMedia({
-                audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+                audio: raw ? { echoCancellation: false, noiseSuppression: false, autoGainControl: false } : true
             });
+            liveLog(raw ? 'Traitements audio du navigateur coupés' : 'Micro dans ses réglages par défaut');
             liveAudioContext = new (window.AudioContext || window.webkitAudioContext)();
             await liveAudioContext.resume();
             
@@ -2031,6 +2081,8 @@
             
             document.getElementById('startLiveBtn').disabled = true;
             document.getElementById('stopLiveBtn').disabled = false;
+            document.getElementById('liveRecordBtn').disabled = false;
+            document.getElementById('liveRawAudio').disabled = true;
             liveLog('Capture démarrée - en attente du signal...');
             liveVisualInterval = setInterval(updateLiveVisuals, 100);
             
@@ -2048,12 +2100,16 @@
         if (liveAudioContext) { liveAudioContext.close(); liveAudioContext = null; }
         if (liveWakeLock) { liveWakeLock.release(); liveWakeLock = null; }
         if (liveRx) liveFinishImage('arrêt');
+        if (liveRecord) saveLiveRecord();
+        document.getElementById('liveRecordBtn').disabled = true;
+        document.getElementById('liveRawAudio').disabled = false;
         
         document.getElementById('startLiveBtn').disabled = false;
         document.getElementById('stopLiveBtn').disabled = true;
         document.getElementById('liveSourceName').textContent = '-- Arrêté --';
         document.getElementById('liveFreqDisplay').textContent = '---- Hz';
         document.getElementById('levelMeter').style.width = '0%';
+        document.getElementById('levelText').textContent = '-- dBFS';
         
         setLiveState('idle');
         liveLog('Capture audio arrêtée');
@@ -2062,9 +2118,19 @@
     // Bloc d'échantillons reçu du micro
     function liveFeed(samples) {
         if (liveState === 'idle' || !liveDemod) return;
-        let e = 0;
-        for (let i = 0; i < samples.length; i++) e += samples[i] * samples[i];
+        let e = 0, pk = 0;
+        for (let i = 0; i < samples.length; i++) {
+            e += samples[i] * samples[i];
+            const a = Math.abs(samples[i]);
+            if (a > pk) pk = a;
+        }
         liveLevel = Math.sqrt(e / samples.length);
+        livePeak = pk;
+        if (liveRecord) {
+            liveRecord.chunks.push(samples.slice());
+            liveRecord.length += samples.length;
+            if (liveRecord.length >= LIVE_RECORD_MAX_SECONDS * liveRate) saveLiveRecord();
+        }
         liveTrack.push(liveDemod.process(samples));
         
         if (liveState === 'listening') liveListen();
@@ -2359,8 +2425,65 @@
         console.log('[LIVE] ' + msg);
     }
     
+    // ==========================================================================
+    // ENREGISTREMENT DE LA CAPTURE (WAV PCM 16 bits mono, fréquence du micro)
+    // ==========================================================================
+    
+    function toggleLiveRecord() {
+        if (liveRecord) { saveLiveRecord(); return; }
+        liveRecord = { chunks: [], length: 0, start: new Date() };
+        document.getElementById('liveRecordBtn').textContent = '⏹ Arrêter et sauvegarder';
+        liveLog('Enregistrement de la capture démarré');
+    }
+    
+    function saveLiveRecord() {
+        const rec = liveRecord;
+        liveRecord = null;
+        document.getElementById('liveRecordBtn').textContent = '⏺ Enregistrer la capture';
+        if (!rec || rec.length === 0) return;
+        
+        const n = rec.length;
+        const buf = new ArrayBuffer(44 + n * 2);
+        const v = new DataView(buf);
+        const str = (o, t) => { for (let i = 0; i < t.length; i++) v.setUint8(o + i, t.charCodeAt(i)); };
+        str(0, 'RIFF'); v.setUint32(4, 36 + n * 2, true); str(8, 'WAVE');
+        str(12, 'fmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+        v.setUint32(24, liveRate, true); v.setUint32(28, liveRate * 2, true);
+        v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+        str(36, 'data'); v.setUint32(40, n * 2, true);
+        let o = 44;
+        for (const c of rec.chunks) {
+            for (let i = 0; i < c.length; i++, o += 2) {
+                v.setInt16(o, Math.round(Math.max(-1, Math.min(1, c[i])) * 32767), true);
+            }
+        }
+        
+        const d = rec.start;
+        const p2 = x => String(x).padStart(2, '0');
+        const name = `capture_micro_${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}_${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}.wav`;
+        const url = URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
+        const a = document.createElement('a');
+        a.href = url; a.download = name; a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 5000);
+        
+        const info = `${name} : ${(n / liveRate).toFixed(1)} s, ${liveRate} Hz`;
+        document.getElementById('liveRecordInfo').textContent = info;
+        liveLog('Capture sauvegardée : ' + info);
+    }
+    
     function updateLiveVisuals() {
-        document.getElementById('levelMeter').style.width = Math.min(100, liveLevel * 300) + '%';
+        // Jauge en dBFS sur -60 … 0 : efficace (barre) et crête (trait)
+        const dB = x => x > 0 ? 20 * Math.log10(x) : -120;
+        const pos = x => Math.max(0, Math.min(100, (dB(x) + 60) / 60 * 100));
+        const rms = dB(liveLevel), peak = dB(livePeak);
+        const bar = document.getElementById('levelMeter');
+        bar.style.width = pos(liveLevel) + '%';
+        bar.style.background = peak > -1 ? '#ff3333' : (rms < -30 ? '#ccaa00' : '#00cc00');
+        document.getElementById('levelPeak').style.left = pos(livePeak) + '%';
+        document.getElementById('levelText').textContent =
+            `${rms > -100 ? rms.toFixed(0) : '--'} dBFS efficace, crête ${peak > -100 ? peak.toFixed(0) : '--'} dBFS` +
+            (peak > -1 ? ' — SATURATION, baisser le volume' : rms < -30 ? ' — trop faible, monter le volume' : ' — bon niveau') +
+            (liveRecord ? ` — enregistrement ${(liveRecord.length / liveRate).toFixed(0)} s` : '');
         if (liveTrack && liveTrack.len > liveRate * 0.02) {
             const f = liveTrack.mean(liveTrack.len - liveRate * 0.02, liveTrack.len);
             document.getElementById('liveFreqDisplay').textContent = Math.round(f) + ' Hz';

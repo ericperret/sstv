@@ -3,7 +3,7 @@
   Purpose  : Overview of the sstv repository (SSTV transmission, reception and diagnosis)
   Author   : Eric PERRET
   Date     : 2026-10-17
-  Version  : 1.2
+  Version  : 1.3
   License  : CC BY-NC 4.0
 -->
 
@@ -41,11 +41,11 @@ Slow Scan Television (SSTV) in the browser: encode an image into an audio file, 
 
 | Feature | Description |
 |---|---|
-| Sources | WAV file (8 / 16 / 24 / 32-bit or float, mono or stereo, any sample rate), or live audio from the microphone at its native sample rate (smartphone friendly, screen kept awake) |
+| Sources | WAV file (8 / 16 / 24 / 32-bit or float, mono or stereo, any sample rate), or live audio from the microphone at its native sample rate and default settings (smartphone friendly, screen kept awake) |
 | Modes | Automatic detection by VIS code, or forced: Robot36 / 72, Martin M1 / M2, Scottie S1 / S2, PD90 to PD240 |
 | Synchronisation | Robot36: sync tracked line by line and measured clock (no slant); automatic AFC, manual Doppler offset |
 | Analysis | Signal analysis, image displayed as it decodes, debug log |
-| Output | PNG export of the decoded image |
+| Output | PNG export of the decoded image; WAV recording of the microphone capture |
 
 ## SSTV Diagnostic
 
@@ -71,6 +71,7 @@ SSTV is used by radio amateurs to send images over HF / VHF. These tools let you
 | 2026-10-17 | Files renamed without copy suffix, header blocks, home page fixed, README / LISEZMOI rewritten |
 | 2026-10-17 | Transmitter 4.1: standard VIS, exact timing, Robot36 fixed. Decoder 1.1: VIS detection, any WAV format, Robot36 sync tracking. Validated against an external decoder and ARISS / PySSTV recordings (Robot36 only) |
 | 2026-10-17 | Decoder 1.2: live microphone reception on the same decoding chain as files (Robot36 VIS, sync tracking, measured clock), tested on simulated acoustic coupling |
+| 2026-10-17 | Decoder 1.3: microphone left at its default settings (browser processing off only on request), level meter in dBFS, recording of the microphone capture to WAV |
 
 ## License
 
