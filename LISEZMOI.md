@@ -30,7 +30,7 @@ Télévision à balayage lent (SSTV) dans le navigateur : émission d'une image 
 | Fonction | Description |
 |---|---|
 | Image | Chargement d'une image, mise à l'échelle du mode choisi |
-| Modes | Robot36 couleur et N&B, Robot72, Martin M1 / M2, Scottie S1 / S2, PD120, PD180 (durée affichée) |
+| Modes | Robot36 couleur et N&B, Robot72, Martin M1 / M2, Scottie S1 / S2, PD90, PD120, PD160, PD180, PD240 (durée affichée) |
 | Signal | WAV PCM 16 bits mono 44,1 kHz, temps exact à l'échantillon (ligne Robot36 = 150,000 ms) |
 | En-tête | Code VIS normalisé (bit de start, 7 bits, parité paire, bit de stop), mire de calibration 1 s à 1 900 Hz en option |
 | Sortie | Fichier WAV téléchargé, à diffuser par un émetteur ou un haut-parleur |
@@ -41,10 +41,11 @@ Télévision à balayage lent (SSTV) dans le navigateur : émission d'une image 
 
 | Fonction | Description |
 |---|---|
-| Sources | Fichier WAV (8 / 16 / 24 / 32 bits ou flottant, mono ou stéréo, toute fréquence d'échantillonnage), ou micro en direct à sa fréquence et dans ses réglages par défaut (adapté au téléphone, écran maintenu allumé) |
+| Sources | Fichier WAV (8 / 16 / 24 / 32 bits ou flottant, mono ou stéréo, toute fréquence d'échantillonnage), ou micro en direct à sa fréquence native (adapté au téléphone, écran maintenu allumé) |
 | Modes | Détection automatique par code VIS, ou forcé : Robot36 / 72, Martin M1 / M2, Scottie S1 / S2, PD90 à PD240 |
-| Synchronisation | Robot36 : synchro suivie ligne par ligne et horloge mesurée (pas d'inclinaison) ; AFC automatique, décalage Doppler manuel |
-| Analyse | Analyse du signal, affichage de l'image au fil du décodage |
+| Synchronisation | Tous les modes : synchro suivie ligne par ligne et horloge mesurée (pas d'inclinaison) ; correction de fréquence automatique (AFC) mesurée sur l'amorce du VIS et les synchros, jusqu'à ±250 Hz |
+| Fichier WAV | Ouvrir un fichier lance le diagnostic intégré (VIS, mesures de synchro, écart d'horloge, dérive, tracés des écarts et de la fréquence) et décode aussitôt si le mode est connu |
+| Micro | Choix de la famille (Robot, Martin, Scottie, PD) ; réception lancée par START ; les 5 dernières minutes sont gardées, toucher l'image les redécode dans le sous-mode suivant, même après STOP |
 | Sortie | Export PNG de l'image décodée ; enregistrement WAV de la capture micro |
 
 ## SSTV Diagnostic
@@ -62,7 +63,7 @@ Télévision à balayage lent (SSTV) dans le navigateur : émission d'une image 
 
 ## Versions
 
-Les outils à la racine du dépôt sont la version **approuvée**. La version en cours est dans le dossier [dev/](dev/), mêmes noms de fichiers, en ligne sur ▶️ **[dev/index2.html](https://ericperret.github.io/sstv/dev/index2.html)**. Une version n'est copiée à la racine qu'une fois approuvée ; chaque version approuvée porte une étiquette (`tx-4.1`, `rx-1.6`…).
+Les outils à la racine du dépôt sont la version **approuvée**. La version en cours est dans le dossier [dev/](dev/), mêmes noms de fichiers, en ligne sur ▶️ **[dev/index2.html](https://ericperret.github.io/sstv/dev/index2.html)**. Une version n'est copiée à la racine qu'une fois approuvée ; chaque version approuvée porte une étiquette (`tx-4.2`, `rx-1.8`, `diag-2.0`…).
 
 ## Radioamateurisme
 
@@ -82,6 +83,7 @@ La SSTV sert aux radioamateurs pour transmettre des images en HF / VHF. Ces outi
 | 2026-10-18 | Approuvé : émetteur 4.1, décodeur 1.6. En cours dans [dev/](https://ericperret.github.io/sstv/dev/index2.html) : émetteur 4.2 (Robot72 corrigé, PD90 / PD160 / PD240), décodeur 1.7 (tous les modes avec suivi de synchro, choix de la famille au micro, tampon de 5 minutes redécodé en touchant l'image) |
 | 2026-10-18 | Approuvé : diagnostic 2.0 |
 | 2026-10-18 | En cours dans dev/ : décodeur 1.8, onglet fichier avec le diagnostic intégré : ouvrir un WAV lance les mesures et décode aussitôt si le mode est connu (VIS ou choisi) ; correction de fréquence automatique (AFC) mesurée sur l'amorce du VIS et les synchros, jusqu'à ±250 Hz ; boutons Analyser / Décoder, Doppler manuel, forme d'onde et spectrogramme supprimés |
+| 2026-10-18 | Approuvé : émetteur 4.2, décodeur 1.8 |
 
 ## Licence
 

@@ -30,7 +30,7 @@ Slow Scan Television (SSTV) in the browser: encode an image into an audio file, 
 | Feature | Description |
 |---|---|
 | Image | Image loading, scaled to the chosen mode |
-| Modes | Robot36 colour and B&W, Robot72, Martin M1 / M2, Scottie S1 / S2, PD120, PD180 (duration shown) |
+| Modes | Robot36 colour and B&W, Robot72, Martin M1 / M2, Scottie S1 / S2, PD90, PD120, PD160, PD180, PD240 (duration shown) |
 | Signal | PCM 16-bit mono 44.1 kHz WAV, sample-accurate timing (Robot36 line = 150.000 ms) |
 | Header | Standard VIS code (start bit, 7 bits, even parity, stop bit), optional 1 s calibration tone at 1,900 Hz |
 | Output | Downloaded WAV file, to be played through a transmitter or a loudspeaker |
@@ -41,10 +41,11 @@ Slow Scan Television (SSTV) in the browser: encode an image into an audio file, 
 
 | Feature | Description |
 |---|---|
-| Sources | WAV file (8 / 16 / 24 / 32-bit or float, mono or stereo, any sample rate), or live audio from the microphone at its native sample rate and default settings (smartphone friendly, screen kept awake) |
+| Sources | WAV file (8 / 16 / 24 / 32-bit or float, mono or stereo, any sample rate), or live audio from the microphone at its native sample rate (smartphone friendly, screen kept awake) |
 | Modes | Automatic detection by VIS code, or forced: Robot36 / 72, Martin M1 / M2, Scottie S1 / S2, PD90 to PD240 |
-| Synchronisation | Robot36: sync tracked line by line and measured clock (no slant); automatic AFC, manual Doppler offset |
-| Analysis | Signal analysis, image displayed as it decodes |
+| Synchronisation | All modes: sync tracked line by line and measured clock (no slant); automatic frequency correction (AFC) measured on the VIS leader and the sync pulses, up to ±250 Hz |
+| WAV file | Opening a file runs the built-in diagnostic (VIS, sync measurements, clock error, drift, sync deviation and frequency plots) and decodes at once when the mode is known |
+| Microphone | Family selector (Robot, Martin, Scottie, PD); reception starts on START; the last 5 minutes are kept and tapping the image decodes them again in the next sub-mode, even after STOP |
 | Output | PNG export of the decoded image; WAV recording of the microphone capture |
 
 ## SSTV Diagnostic
@@ -62,7 +63,7 @@ Slow Scan Television (SSTV) in the browser: encode an image into an audio file, 
 
 ## Versions
 
-The tools at the root of the repository are the **approved** version. Work in progress lives in the [dev/](dev/) folder, same file names, online at ▶️ **[dev/index2.html](https://ericperret.github.io/sstv/dev/index2.html)**. A version is copied to the root only once approved; each approved version is tagged (`tx-4.1`, `rx-1.6`…).
+The tools at the root of the repository are the **approved** version. Work in progress lives in the [dev/](dev/) folder, same file names, online at ▶️ **[dev/index2.html](https://ericperret.github.io/sstv/dev/index2.html)**. A version is copied to the root only once approved; each approved version is tagged (`tx-4.2`, `rx-1.8`, `diag-2.0`…).
 
 ## Amateur radio
 
@@ -82,6 +83,7 @@ SSTV is used by radio amateurs to send images over HF / VHF. These tools let you
 | 2026-10-18 | Approved: transmitter 4.1, decoder 1.6. In progress in [dev/](https://ericperret.github.io/sstv/dev/index2.html): transmitter 4.2 (Robot72 fixed, PD90 / PD160 / PD240), decoder 1.7 (all modes with sync tracking, microphone family selector, 5-minute buffer re-decoded by tapping the image) |
 | 2026-10-18 | Approved: diagnostic 2.0 |
 | 2026-10-18 | In progress in dev/: decoder 1.8, file tab with the built-in diagnostic: opening a WAV runs the measurements and decodes at once when the mode is known (VIS or chosen); automatic frequency correction (AFC) measured on the VIS leader and the sync pulses, up to ±250 Hz; Analyse / Decode buttons, manual Doppler, waveform and spectrogram removed |
+| 2026-10-18 | Approved: transmitter 4.2, decoder 1.8 |
 
 ## License
 

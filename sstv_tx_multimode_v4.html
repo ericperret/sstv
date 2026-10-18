@@ -5,8 +5,8 @@
   Objet      : émetteur SSTV : image encodée en fichier WAV, modes Robot, Martin,
                Scottie, PD, code VIS, mire de calibration
   Auteur     : Eric PERRET
-  Version    : 4.1
-  Date       : 2026-10-17
+  Version    : 4.2
+  Date       : 2026-10-18
   Plateforme : HTML / CSS / JavaScript, fichier unique, aucune librairie
   Sortie     : WAV PCM 16 bits mono 44 100 Hz, en-tête RIFF canonique 44 octets
   Historique :
@@ -20,6 +20,9 @@
                      studio (Barber N7CXI) ; suppression du filtre passe-bas,
                      du lissage de fin de ligne et du choix de fréquence
                      d'échantillonnage
+    4.2 (2026-10-18) Robot72 conforme (Y, R-Y et B-Y sur chaque ligne, ligne
+                     de 300 ms) ; ajout PD90, PD160, PD240 ; durée estimée
+                     calculée pour chaque structure de ligne
 ================================================================================
 -->
 <html lang="fr">
@@ -181,7 +184,7 @@
 <body>
     <div class="container">
         <h1>📡 Émetteur SSTV Multi-Mode</h1>
-        <p class="subtitle">Version 4.1 — Robot, Martin, Scottie, PD</p>
+        <p class="subtitle">Version 4.2 — Robot, Martin, Scottie, PD</p>
         
         <div class="control-group">
             <h3>1. Charger une image</h3>
@@ -209,9 +212,12 @@
                         <option value="scottieS1">Scottie S1 (~110s)</option>
                         <option value="scottieS2">Scottie S2 (~71s)</option>
                     </optgroup>
-                    <optgroup label="PD (640×496)">
-                        <option value="pd120">PD120 (~126s)</option>
-                        <option value="pd180">PD180 (~187s)</option>
+                    <optgroup label="PD">
+                        <option value="pd90">PD90 320×256 (~90s)</option>
+                        <option value="pd120">PD120 640×496 (~126s)</option>
+                        <option value="pd160">PD160 512×400 (~161s)</option>
+                        <option value="pd180">PD180 640×496 (~187s)</option>
+                        <option value="pd240">PD240 640×496 (~248s)</option>
                     </optgroup>
                 </select>
             </div>
@@ -286,10 +292,11 @@
             porchFreq: 1500,
             blackFreq: 1500,
             whiteFreq: 2300,
-            separatorEvenFreq: 1500,
-            separatorOddFreq: 1500,
-            chromaPorchFreq: 1500,
-            lineSequence: "yuv_interleaved"
+            separatorEvenFreq: 1500,  // avant R-Y
+            separatorOddFreq: 2300,   // avant B-Y
+            chromaPorchFreq: 1900,    // après le séparateur de R-Y
+            chromaPorch2Freq: 1500,   // après le séparateur de B-Y
+            lineSequence: "yuv_full"  // Y, R-Y, B-Y sur chaque ligne
         },
         robot36bw: {
             name: "Robot36 B&W",
@@ -376,6 +383,21 @@
         },
         
         // PD modes (high resolution) - all 4 components have SAME duration
+        pd90: {
+            name: "PD90",
+            visCode: 0x63,
+            width: 320,
+            height: 256,
+            colorMode: "yuv",
+            scanMs: 170.240,
+            syncMs: 20.0,
+            porchMs: 2.08,
+            syncFreq: 1200,
+            porchFreq: 1500,
+            blackFreq: 1500,
+            whiteFreq: 2300,
+            lineSequence: "pd"
+        },
         pd120: {
             name: "PD120",
             visCode: 0x5F,
@@ -398,6 +420,36 @@
             height: 496,
             colorMode: "yuv",
             scanMs: 183.04,     // Each component: Y0, R-Y, B-Y, Y1 all same
+            syncMs: 20.0,
+            porchMs: 2.08,
+            syncFreq: 1200,
+            porchFreq: 1500,
+            blackFreq: 1500,
+            whiteFreq: 2300,
+            lineSequence: "pd"
+        },
+        pd160: {
+            name: "PD160",
+            visCode: 0x62,
+            width: 512,
+            height: 400,
+            colorMode: "yuv",
+            scanMs: 195.584,
+            syncMs: 20.0,
+            porchMs: 2.08,
+            syncFreq: 1200,
+            porchFreq: 1500,
+            blackFreq: 1500,
+            whiteFreq: 2300,
+            lineSequence: "pd"
+        },
+        pd240: {
+            name: "PD240",
+            visCode: 0x61,
+            width: 640,
+            height: 496,
+            colorMode: "yuv",
+            scanMs: 244.48,
             syncMs: 20.0,
             porchMs: 2.08,
             syncFreq: 1200,
@@ -447,16 +499,26 @@
     
     function estimateTransmissionTime(mode) {
         let lineTime;
-        if (mode.lineSequence === 'pd') {
-            // PD: pair of lines = sync + porch + 4 * scanMs
-            lineTime = (mode.syncMs + mode.porchMs + mode.scanMs * 4) / 2; // Per line average
-        } else if (mode.colorMode === 'gbr') {
-            lineTime = mode.syncMs + mode.porchMs + mode.scanMs * 3 + (mode.separatorMs || 0) * 3;
-        } else if (mode.colorMode === 'yuv' && mode.chromaMs) {
-            lineTime = mode.syncMs + mode.porchMs + mode.scanMs + 
-                      (mode.separatorMs || 0) + (mode.chromaPorchMs || 0) + mode.chromaMs;
-        } else {
-            lineTime = mode.syncMs + mode.porchMs + mode.scanMs;
+        switch (mode.lineSequence) {
+            case 'pd':              // une synchro pour deux lignes
+                lineTime = (mode.syncMs + mode.porchMs + mode.scanMs * 4) / 2;
+                break;
+            case 'gbr_sequential':
+                lineTime = mode.syncMs + mode.porchMs + mode.scanMs * 3 + mode.separatorMs * 3;
+                break;
+            case 'scottie':
+                lineTime = mode.syncMs + mode.porchMs + mode.scanMs * 3 + mode.separatorMs * 2;
+                break;
+            case 'yuv_full':
+                lineTime = mode.syncMs + mode.porchMs + mode.scanMs +
+                           2 * (mode.separatorMs + mode.chromaPorchMs + mode.chromaMs);
+                break;
+            case 'yuv_interleaved':
+                lineTime = mode.syncMs + mode.porchMs + mode.scanMs +
+                           mode.separatorMs + mode.chromaPorchMs + mode.chromaMs;
+                break;
+            default:
+                lineTime = mode.syncMs + mode.porchMs + mode.scanMs;
         }
         return Math.round(lineTime * mode.height / 1000);
     }
@@ -693,6 +755,23 @@
         }
     }
     
+    // Robot72 : synchro, palier, Y, séparateur 1500 Hz, palier 1900 Hz, R-Y,
+    // séparateur 2300 Hz, palier 1500 Hz, B-Y
+    function writeRobotFullLines(w, colorData, mode, updateProgress) {
+        for (let lineNum = 0; lineNum < colorData.height; lineNum++) {
+            w.tone(mode.syncFreq, mode.syncMs);
+            w.tone(mode.porchFreq, mode.porchMs);
+            w.scan(colorData.Y[lineNum], mode.scanMs, mode.blackFreq, mode.whiteFreq);
+            w.tone(mode.separatorEvenFreq, mode.separatorMs);
+            w.tone(mode.chromaPorchFreq, mode.chromaPorchMs);
+            w.scan(colorData.V[lineNum], mode.chromaMs, mode.blackFreq, mode.whiteFreq);
+            w.tone(mode.separatorOddFreq, mode.separatorMs);
+            w.tone(mode.chromaPorch2Freq, mode.chromaPorchMs);
+            w.scan(colorData.U[lineNum], mode.chromaMs, mode.blackFreq, mode.whiteFreq);
+            updateProgress((lineNum + 1) / colorData.height * 100);
+        }
+    }
+    
     // Martin : synchro, palier, G, séparateur, B, séparateur, R, séparateur
     function writeMartinLines(w, colorData, mode, updateProgress) {
         for (let lineNum = 0; lineNum < colorData.height; lineNum++) {
@@ -792,6 +871,7 @@
         if (mode.lineSequence === 'gbr_sequential') writeMartinLines(w, colorData, mode, progress);
         else if (mode.lineSequence === 'scottie') writeScottieLines(w, colorData, mode, progress);
         else if (mode.lineSequence === 'pd') writePDLines(w, colorData, mode, progress);
+        else if (mode.lineSequence === 'yuv_full') writeRobotFullLines(w, colorData, mode, progress);
         else writeRobotLines(w, colorData, mode, progress);
         
         const samples = w.samples();
