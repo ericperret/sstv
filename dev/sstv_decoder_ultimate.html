@@ -1652,6 +1652,7 @@
     let liveAnchor = 0;           // début de réception : START, effacement ou dernier VIS
     let liveDec = null;           // image en cours de décodage
     let liveLastDone = null;      // dernière image terminée
+    let micProblem = null;        // raison d'indisponibilité du micro, ou null
     let liveSource = null;
     const liveJournal = [];       // mémoire interne, jamais affichée
     let liveVisFrom = 0;
@@ -1777,8 +1778,6 @@
     // ÉTAT DU MICRO : vérifié sans demander l'autorisation ; bouton START grisé
     // (mais cliquable) et raison affichée au clic si le micro est indisponible
     // ==========================================================================
-    
-    let micProblem = null;
     
     async function checkMic() {
         let reason = null;
