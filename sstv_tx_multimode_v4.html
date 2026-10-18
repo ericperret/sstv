@@ -5,9 +5,21 @@
   Objet      : émetteur SSTV : image encodée en fichier WAV, modes Robot, Martin,
                Scottie, PD, code VIS, mire de calibration
   Auteur     : Eric PERRET
-  Version    : 4.0
-  Date       : 2026-01-17
+  Version    : 4.1
+  Date       : 2026-10-17
   Plateforme : HTML / CSS / JavaScript, fichier unique, aucune librairie
+  Sortie     : WAV PCM 16 bits mono 44 100 Hz, en-tête RIFF canonique 44 octets
+  Historique :
+    4.0 (2026-01-17) version initiale multi-mode
+    4.1 (2026-10-17) VIS conforme (bit de start, 7 bits, parité paire) ;
+                     temps calculé en absolu, arrondi à l'échantillon sans
+                     cumul d'erreur (ligne Robot36 = 150,000 ms) ; un pixel =
+                     une fréquence, sans interpolation parasite ; Robot36 :
+                     séparateur 1500 / 2300 Hz, palier 1900 Hz, chrominance
+                     moyennée sur le couple de lignes ; couleur BT.601 échelle
+                     studio (Barber N7CXI) ; suppression du filtre passe-bas,
+                     du lissage de fin de ligne et du choix de fréquence
+                     d'échantillonnage
 ================================================================================
 -->
 <html lang="fr">
@@ -169,7 +181,7 @@
 <body>
     <div class="container">
         <h1>📡 Émetteur SSTV Multi-Mode</h1>
-        <p class="subtitle">Version 4.0 — Robot, Martin, Scottie, PD</p>
+        <p class="subtitle">Version 4.1 — Robot, Martin, Scottie, PD</p>
         
         <div class="control-group">
             <h3>1. Charger une image</h3>
@@ -205,25 +217,8 @@
             </div>
             <div id="modeDescription" class="mode-info"></div>
             
-            <div class="option-row">
-                <label>Fréquence d'échantillonnage:</label>
-                <select id="sampleRate">
-                    <option value="44100">44100 Hz (recommandé)</option>
-                    <option value="48000">48000 Hz</option>
-                    <option value="22050">22050 Hz (petit fichier)</option>
-                </select>
-            </div>
-            
             <span class="advanced-toggle" onclick="toggleAdvanced()">▶ Options avancées</span>
             <div id="advancedOptions" class="advanced-options">
-                <div class="option-row">
-                    <input type="checkbox" id="enableLPF" checked>
-                    <label class="checkbox-label">Filtre passe-bas (réduit le bruit HF)</label>
-                </div>
-                <div class="option-row">
-                    <input type="checkbox" id="enableSmooth" checked>
-                    <label class="checkbox-label">Lissage des transitions de ligne</label>
-                </div>
                 <div class="option-row">
                     <input type="checkbox" id="includeVIS" checked>
                     <label class="checkbox-label">Inclure le code VIS (auto-détection)</label>
@@ -270,9 +265,10 @@
             porchFreq: 1500,
             blackFreq: 1500,
             whiteFreq: 2300,
-            separatorEvenFreq: 1500,  // Y-R separator (odd lines send R-Y)
-            separatorOddFreq: 1500,   // Y-B separator (even lines send B-Y)
-            lineSequence: "yuv_interleaved"  // Y then alternating R-Y/B-Y
+            separatorEvenFreq: 1500,  // ligne paire : R-Y
+            separatorOddFreq: 2300,   // ligne impaire : B-Y
+            chromaPorchFreq: 1900,
+            lineSequence: "yuv_interleaved"  // Y puis R-Y / B-Y en alternance
         },
         robot72: {
             name: "Robot72 Color",
@@ -292,6 +288,7 @@
             whiteFreq: 2300,
             separatorEvenFreq: 1500,
             separatorOddFreq: 1500,
+            chromaPorchFreq: 1500,
             lineSequence: "yuv_interleaved"
         },
         robot36bw: {
@@ -425,7 +422,6 @@
     // ==========================================================================
     
     let imageData = null;
-    let globalPhase = 0;
     
     // ==========================================================================
     // EVENT HANDLERS
@@ -518,13 +514,15 @@
     }
     
     // ==========================================================================
-    // COLOR CONVERSION (BT.601 CORRECTED)
+    // CONVERSION COULEUR
     // ==========================================================================
     
+    // Y, R-Y (V), B-Y (U) selon BT.601 échelle studio (Barber N7CXI, Dayton 2000)
     function rgbToYUV(imageData) {
         const width = imageData.width;
         const height = imageData.height;
         const pixels = imageData.data;
+        const clamp = v => Math.max(0, Math.min(255, Math.round(v)));
         
         const Y = [];
         const U = [];
@@ -541,14 +539,9 @@
                 const g = pixels[idx + 1];
                 const b = pixels[idx + 2];
                 
-                // BT.601 standard coefficients (CORRECTED)
-                const yVal = 0.299 * r + 0.587 * g + 0.114 * b;
-                const uVal = -0.169 * r - 0.331 * g + 0.500 * b + 128;
-                const vVal = 0.500 * r - 0.419 * g - 0.081 * b + 128;
-                
-                Y[y][x] = Math.max(0, Math.min(255, Math.round(yVal)));
-                U[y][x] = Math.max(0, Math.min(255, Math.round(uVal)));
-                V[y][x] = Math.max(0, Math.min(255, Math.round(vVal)));
+                Y[y][x] = clamp(16 + (65.738 * r + 129.057 * g + 25.064 * b) / 256);
+                V[y][x] = clamp(128 + (112.439 * r - 94.154 * g - 18.285 * b) / 256);
+                U[y][x] = clamp(128 + (-37.945 * r - 74.494 * g + 112.439 * b) / 256);
             }
         }
         
@@ -580,392 +573,178 @@
         return { G, B, R, width, height };
     }
     
-    // ==========================================================================
-    // TONE GENERATION WITH PHASE CONTINUITY
-    // ==========================================================================
-    
-    function generateTone(buffer, startIdx, frequency, numSamples, sampleRate) {
-        const amplitude = 0.8;
-        const phaseIncrement = 2 * Math.PI * frequency / sampleRate;
-        
-        for (let i = 0; i < numSamples; i++) {
-            buffer[startIdx + i] = amplitude * Math.sin(globalPhase);
-            globalPhase += phaseIncrement;
-            
-            // Keep phase in [0, 2π]
-            while (globalPhase > 2 * Math.PI) {
-                globalPhase -= 2 * Math.PI;
-            }
-        }
-        return numSamples;
-    }
-    
-    function encodeImageLine(buffer, startIdx, lineData, blackFreq, whiteFreq, numSamples, sampleRate) {
-        const pixelsPerLine = lineData.length;
-        const samplesPerPixel = numSamples / pixelsPerLine;
-        const amplitude = 0.8;
-        const freqRange = whiteFreq - blackFreq;
-        
-        let prevFreq = blackFreq + (lineData[0] / 255.0) * freqRange;
-        
-        for (let i = 0; i < numSamples; i++) {
-            const pixelIndex = Math.min(Math.floor(i / samplesPerPixel), pixelsPerLine - 1);
-            const pixelValue = lineData[pixelIndex] / 255.0;
-            const targetFreq = blackFreq + pixelValue * freqRange;
-            
-            // Smooth frequency transition between pixels
-            const posInPixel = (i % samplesPerPixel) / samplesPerPixel;
-            const frequency = prevFreq + (targetFreq - prevFreq) * posInPixel;
-            
-            const phaseIncrement = 2 * Math.PI * frequency / sampleRate;
-            buffer[startIdx + i] = amplitude * Math.sin(globalPhase);
-            globalPhase += phaseIncrement;
-            
-            // Update prevFreq at pixel boundaries
-            if (posInPixel < 0.01) {
-                prevFreq = targetFreq;
-            }
-            
-            while (globalPhase > 2 * Math.PI) {
-                globalPhase -= 2 * Math.PI;
-            }
-        }
-        return numSamples;
+    // Moyenne de deux lignes (chrominance partagée par un couple de lignes)
+    function averageRows(a, b) {
+        const out = new Uint8Array(a.length);
+        for (let x = 0; x < a.length; x++) out[x] = Math.round((a[x] + b[x]) / 2);
+        return out;
     }
     
     // ==========================================================================
-    // LOW-PASS FILTER
+    // GÉNÉRATION DU SIGNAL
+    // Le temps théorique de chaque segment est cumulé en millisecondes (double)
+    // et seule la fin de chaque segment est arrondie à l'échantillon : aucune
+    // erreur ne s'accumule d'une ligne à l'autre. Phase continue.
     // ==========================================================================
     
-    function applyLowPassFilter(buffer, cutoffRatio = 0.15) {
-        const alpha = cutoffRatio;
-        let prev = buffer[0];
-        
-        for (let i = 1; i < buffer.length; i++) {
-            buffer[i] = prev + alpha * (buffer[i] - prev);
-            prev = buffer[i];
+    const SAMPLE_RATE = 44100;
+    const AMPLITUDE = 0.8;
+    
+    function SignalWriter(sampleRate) {
+        this.fs = sampleRate;
+        this.buf = new Float32Array(sampleRate * 10);
+        this.n = 0;       // prochain échantillon à écrire
+        this.t = 0;       // fin théorique du dernier segment (ms)
+        this.phase = 0;
+    }
+    
+    SignalWriter.prototype.reserve = function (end) {
+        if (end <= this.buf.length) return;
+        let size = this.buf.length * 2;
+        while (size < end) size *= 2;
+        const nb = new Float32Array(size);
+        nb.set(this.buf.subarray(0, this.n));
+        this.buf = nb;
+    };
+    
+    // Ton fixe de durée ms
+    SignalWriter.prototype.tone = function (freq, ms) {
+        const end = Math.round((this.t + ms) * this.fs / 1000);
+        this.reserve(end);
+        const inc = 2 * Math.PI * freq / this.fs;
+        for (; this.n < end; this.n++) {
+            this.buf[this.n] = AMPLITUDE * Math.sin(this.phase);
+            this.phase += inc;
         }
-        
-        // Second pass (bi-directional for zero phase shift)
-        prev = buffer[buffer.length - 1];
-        for (let i = buffer.length - 2; i >= 0; i--) {
-            buffer[i] = prev + alpha * (buffer[i] - prev);
-            prev = buffer[i];
+        this.phase %= 2 * Math.PI;
+        this.t += ms;
+    };
+    
+    // Balayage : values (0-255) réparties uniformément sur ms
+    SignalWriter.prototype.scan = function (values, ms, blackFreq, whiteFreq) {
+        const t0 = this.t;
+        const end = Math.round((t0 + ms) * this.fs / 1000);
+        this.reserve(end);
+        const count = values.length;
+        const k = (whiteFreq - blackFreq) / 255;
+        const pixelsPerMs = count / ms;
+        for (; this.n < end; this.n++) {
+            let p = Math.floor((this.n * 1000 / this.fs - t0) * pixelsPerMs);
+            if (p < 0) p = 0; else if (p >= count) p = count - 1;
+            const freq = blackFreq + values[p] * k;
+            this.buf[this.n] = AMPLITUDE * Math.sin(this.phase);
+            this.phase += 2 * Math.PI * freq / this.fs;
         }
-        
-        return buffer;
+        this.phase %= 2 * Math.PI;
+        this.t += ms;
+    };
+    
+    SignalWriter.prototype.samples = function () {
+        return this.buf.subarray(0, this.n);
+    };
+    
+    // ==========================================================================
+    // CODE VIS : amorce 300 ms, coupure 10 ms, amorce 300 ms, start 30 ms,
+    // 7 bits poids faible en premier (1 = 1100 Hz, 0 = 1300 Hz), parité paire,
+    // stop 30 ms
+    // ==========================================================================
+    
+    function writeVIS(w, visCode) {
+        w.tone(VIS.LEADER_FREQ, 300);
+        w.tone(VIS.BREAK_FREQ, 10);
+        w.tone(VIS.LEADER_FREQ, 300);
+        w.tone(VIS.BREAK_FREQ, VIS.BIT_MS);
+        let ones = 0;
+        for (let bit = 0; bit < 7; bit++) {
+            const one = (visCode >> bit) & 1;
+            ones += one;
+            w.tone(one ? VIS.ONE_FREQ : VIS.ZERO_FREQ, VIS.BIT_MS);
+        }
+        w.tone((ones & 1) ? VIS.ONE_FREQ : VIS.ZERO_FREQ, VIS.BIT_MS);
+        w.tone(VIS.BREAK_FREQ, VIS.BIT_MS);
     }
     
     // ==========================================================================
-    // LINE TRANSITION SMOOTHING
+    // ENCODEURS PAR MODE
     // ==========================================================================
     
-    function smoothLineTransition(buffer, lineEndIdx, windowSize = 32) {
-        const startWindow = Math.max(0, lineEndIdx - windowSize);
-        
-        for (let i = 0; i < windowSize && startWindow + i < buffer.length; i++) {
-            const factor = (i + 1) / windowSize;
-            // Hanning window for smooth fade
-            const smoothFactor = 0.5 * (1 - Math.cos(Math.PI * factor));
-            // Don't fully attenuate, just smooth
-            buffer[startWindow + i] *= 0.7 + 0.3 * smoothFactor;
-        }
-    }
-    
-    // ==========================================================================
-    // VIS CODE GENERATION
-    // ==========================================================================
-    
-    function generateVISCode(visCode, sampleRate) {
-        const samplesPerMs = sampleRate / 1000;
-        
-        // Calculate buffer size
-        const visSize = Math.floor(samplesPerMs * (300 + 10 + 300 + 10 * VIS.BIT_MS + 30));
-        const buffer = new Float32Array(visSize);
-        let idx = 0;
-        
-        // Leader tone (1900Hz, 300ms)
-        idx += generateTone(buffer, idx, VIS.LEADER_FREQ, Math.floor(300 * samplesPerMs), sampleRate);
-        
-        // Break (1200Hz, 10ms)
-        idx += generateTone(buffer, idx, VIS.BREAK_FREQ, Math.floor(10 * samplesPerMs), sampleRate);
-        
-        // Leader tone (1900Hz, 300ms)
-        idx += generateTone(buffer, idx, VIS.LEADER_FREQ, Math.floor(300 * samplesPerMs), sampleRate);
-        
-        // VIS data bits (LSB first)
-        let parity = false;
-        for (let bit = 0; bit < 8; bit++) {
-            const bitValue = (visCode & (1 << bit)) !== 0;
-            const frequency = bitValue ? VIS.ONE_FREQ : VIS.ZERO_FREQ;
-            idx += generateTone(buffer, idx, frequency, Math.floor(VIS.BIT_MS * samplesPerMs), sampleRate);
-            parity ^= bitValue;
-        }
-        
-        // Parity bit (even parity)
-        const parityFreq = parity ? VIS.ONE_FREQ : VIS.ZERO_FREQ;
-        idx += generateTone(buffer, idx, parityFreq, Math.floor(VIS.BIT_MS * samplesPerMs), sampleRate);
-        
-        // Stop bit
-        idx += generateTone(buffer, idx, VIS.BREAK_FREQ, Math.floor(30 * samplesPerMs), sampleRate);
-        
-        return buffer.slice(0, idx);
-    }
-    
-    // ==========================================================================
-    // MODE-SPECIFIC ENCODERS
-    // ==========================================================================
-    
-    function encodeRobotLines(colorData, mode, sampleRate, updateProgress, enableSmooth) {
-        const samplesPerMs = sampleRate / 1000;
-        const isColor = mode.colorMode === 'yuv';
-        
-        let lineTime = mode.syncMs + mode.porchMs + mode.scanMs;
-        if (isColor) {
-            lineTime += (mode.separatorMs || 0) + (mode.chromaPorchMs || 0) + (mode.chromaMs || 0);
-        }
-        
-        const samplesPerLine = Math.floor(lineTime * samplesPerMs);
-        const totalSamples = samplesPerLine * colorData.height;
-        const buffer = new Float32Array(totalSamples);
-        let idx = 0;
+    function writeRobotLines(w, colorData, mode, updateProgress) {
+        const isColor = mode.colorMode === 'yuv' && mode.chromaMs;
         
         for (let lineNum = 0; lineNum < colorData.height; lineNum++) {
-            const isEvenLine = (lineNum % 2 === 0);
+            w.tone(mode.syncFreq, mode.syncMs);
+            w.tone(mode.porchFreq, mode.porchMs);
+            w.scan(colorData.Y[lineNum], mode.scanMs, mode.blackFreq, mode.whiteFreq);
             
-            // Sync pulse
-            idx += generateTone(buffer, idx, mode.syncFreq, 
-                Math.floor(mode.syncMs * samplesPerMs), sampleRate);
-            
-            // Sync porch
-            idx += generateTone(buffer, idx, mode.porchFreq, 
-                Math.floor(mode.porchMs * samplesPerMs), sampleRate);
-            
-            // Luminance Y
-            idx += encodeImageLine(buffer, idx, colorData.Y[lineNum], 
-                mode.blackFreq, mode.whiteFreq,
-                Math.floor(mode.scanMs * samplesPerMs), sampleRate);
-            
-            // Color mode: add chrominance
-            if (isColor && mode.chromaMs) {
-                // Separator
-                const sepFreq = isEvenLine ? (mode.separatorEvenFreq || 1500) : (mode.separatorOddFreq || 1500);
-                if (mode.separatorMs) {
-                    idx += generateTone(buffer, idx, sepFreq,
-                        Math.floor(mode.separatorMs * samplesPerMs), sampleRate);
-                }
+            if (isColor) {
+                // Ligne paire : R-Y ; ligne impaire : B-Y ; moyenne du couple
+                const isEvenLine = (lineNum % 2 === 0);
+                const first = lineNum - (lineNum % 2);
+                const second = Math.min(first + 1, colorData.height - 1);
+                const plane = isEvenLine ? colorData.V : colorData.U;
+                const chroma = averageRows(plane[first], plane[second]);
                 
-                // Chroma porch
-                if (mode.chromaPorchMs) {
-                    idx += generateTone(buffer, idx, mode.porchFreq,
-                        Math.floor(mode.chromaPorchMs * samplesPerMs), sampleRate);
-                }
-                
-                // Chrominance: even lines = R-Y (V), odd lines = B-Y (U)
-                const chromaData = isEvenLine ? colorData.V[lineNum] : colorData.U[lineNum];
-                idx += encodeImageLine(buffer, idx, chromaData,
-                    mode.blackFreq, mode.whiteFreq,
-                    Math.floor(mode.chromaMs * samplesPerMs), sampleRate);
-            }
-            
-            // Apply line smoothing
-            if (enableSmooth) {
-                smoothLineTransition(buffer, idx, 16);
+                w.tone(isEvenLine ? mode.separatorEvenFreq : mode.separatorOddFreq, mode.separatorMs);
+                w.tone(mode.chromaPorchFreq, mode.chromaPorchMs);
+                w.scan(chroma, mode.chromaMs, mode.blackFreq, mode.whiteFreq);
             }
             
             updateProgress((lineNum + 1) / colorData.height * 100);
         }
-        
-        return buffer.slice(0, idx);
     }
     
-    function encodeMartinLines(colorData, mode, sampleRate, updateProgress, enableSmooth) {
-        const samplesPerMs = sampleRate / 1000;
-        
-        // Martin: Sync + Porch + Green + Sep + Blue + Sep + Red + Sep
-        const lineTime = mode.syncMs + mode.porchMs + mode.scanMs * 3 + mode.separatorMs * 3;
-        const samplesPerLine = Math.floor(lineTime * samplesPerMs);
-        const totalSamples = samplesPerLine * colorData.height;
-        const buffer = new Float32Array(totalSamples);
-        let idx = 0;
-        
+    // Martin : synchro, palier, G, séparateur, B, séparateur, R, séparateur
+    function writeMartinLines(w, colorData, mode, updateProgress) {
         for (let lineNum = 0; lineNum < colorData.height; lineNum++) {
-            // Sync pulse
-            idx += generateTone(buffer, idx, mode.syncFreq,
-                Math.floor(mode.syncMs * samplesPerMs), sampleRate);
-            
-            // Porch
-            idx += generateTone(buffer, idx, mode.porchFreq,
-                Math.floor(mode.porchMs * samplesPerMs), sampleRate);
-            
-            // Green channel
-            idx += encodeImageLine(buffer, idx, colorData.G[lineNum],
-                mode.blackFreq, mode.whiteFreq,
-                Math.floor(mode.scanMs * samplesPerMs), sampleRate);
-            
-            // Separator
-            idx += generateTone(buffer, idx, mode.porchFreq,
-                Math.floor(mode.separatorMs * samplesPerMs), sampleRate);
-            
-            // Blue channel
-            idx += encodeImageLine(buffer, idx, colorData.B[lineNum],
-                mode.blackFreq, mode.whiteFreq,
-                Math.floor(mode.scanMs * samplesPerMs), sampleRate);
-            
-            // Separator
-            idx += generateTone(buffer, idx, mode.porchFreq,
-                Math.floor(mode.separatorMs * samplesPerMs), sampleRate);
-            
-            // Red channel
-            idx += encodeImageLine(buffer, idx, colorData.R[lineNum],
-                mode.blackFreq, mode.whiteFreq,
-                Math.floor(mode.scanMs * samplesPerMs), sampleRate);
-            
-            // Separator
-            idx += generateTone(buffer, idx, mode.porchFreq,
-                Math.floor(mode.separatorMs * samplesPerMs), sampleRate);
-            
-            if (enableSmooth) {
-                smoothLineTransition(buffer, idx, 16);
-            }
-            
+            w.tone(mode.syncFreq, mode.syncMs);
+            w.tone(mode.porchFreq, mode.porchMs);
+            w.scan(colorData.G[lineNum], mode.scanMs, mode.blackFreq, mode.whiteFreq);
+            w.tone(mode.porchFreq, mode.separatorMs);
+            w.scan(colorData.B[lineNum], mode.scanMs, mode.blackFreq, mode.whiteFreq);
+            w.tone(mode.porchFreq, mode.separatorMs);
+            w.scan(colorData.R[lineNum], mode.scanMs, mode.blackFreq, mode.whiteFreq);
+            w.tone(mode.porchFreq, mode.separatorMs);
             updateProgress((lineNum + 1) / colorData.height * 100);
         }
-        
-        return buffer.slice(0, idx);
     }
     
-    function encodeScottieLines(colorData, mode, sampleRate, updateProgress, enableSmooth) {
-        const samplesPerMs = sampleRate / 1000;
-        
-        // Scottie: unique structure - sync is in the middle
-        // Start with color directly: Sep + Green + Sep + Blue + Sync + Porch + Red
-        const lineTime = mode.separatorMs * 2 + mode.scanMs * 3 + mode.syncMs + mode.porchMs;
-        const samplesPerLine = Math.floor(lineTime * samplesPerMs);
-        const totalSamples = samplesPerLine * colorData.height;
-        const buffer = new Float32Array(totalSamples);
-        let idx = 0;
-        
-        // First line starts with sync
-        idx += generateTone(buffer, idx, mode.syncFreq,
-            Math.floor(mode.syncMs * samplesPerMs), sampleRate);
-        
+    // Scottie : synchro initiale, puis séparateur, G, séparateur, B, synchro,
+    // palier, R
+    function writeScottieLines(w, colorData, mode, updateProgress) {
+        w.tone(mode.syncFreq, mode.syncMs);
         for (let lineNum = 0; lineNum < colorData.height; lineNum++) {
-            // Separator + Green
-            idx += generateTone(buffer, idx, mode.porchFreq,
-                Math.floor(mode.separatorMs * samplesPerMs), sampleRate);
-            idx += encodeImageLine(buffer, idx, colorData.G[lineNum],
-                mode.blackFreq, mode.whiteFreq,
-                Math.floor(mode.scanMs * samplesPerMs), sampleRate);
-            
-            // Separator + Blue
-            idx += generateTone(buffer, idx, mode.porchFreq,
-                Math.floor(mode.separatorMs * samplesPerMs), sampleRate);
-            idx += encodeImageLine(buffer, idx, colorData.B[lineNum],
-                mode.blackFreq, mode.whiteFreq,
-                Math.floor(mode.scanMs * samplesPerMs), sampleRate);
-            
-            // Sync + Porch (between Blue and Red)
-            idx += generateTone(buffer, idx, mode.syncFreq,
-                Math.floor(mode.syncMs * samplesPerMs), sampleRate);
-            idx += generateTone(buffer, idx, mode.porchFreq,
-                Math.floor(mode.porchMs * samplesPerMs), sampleRate);
-            
-            // Red
-            idx += encodeImageLine(buffer, idx, colorData.R[lineNum],
-                mode.blackFreq, mode.whiteFreq,
-                Math.floor(mode.scanMs * samplesPerMs), sampleRate);
-            
-            if (enableSmooth) {
-                smoothLineTransition(buffer, idx, 16);
-            }
-            
+            w.tone(mode.porchFreq, mode.separatorMs);
+            w.scan(colorData.G[lineNum], mode.scanMs, mode.blackFreq, mode.whiteFreq);
+            w.tone(mode.porchFreq, mode.separatorMs);
+            w.scan(colorData.B[lineNum], mode.scanMs, mode.blackFreq, mode.whiteFreq);
+            w.tone(mode.syncFreq, mode.syncMs);
+            w.tone(mode.porchFreq, mode.porchMs);
+            w.scan(colorData.R[lineNum], mode.scanMs, mode.blackFreq, mode.whiteFreq);
             updateProgress((lineNum + 1) / colorData.height * 100);
         }
-        
-        return buffer.slice(0, idx);
     }
     
-    function encodePDLines(colorData, mode, sampleRate, updateProgress, enableSmooth) {
-        const samplesPerMs = sampleRate / 1000;
-        
-        // PD modes: correct order is Sync + Porch + Y0 + (R-Y) + (B-Y) + Y1
-        // All 4 components (Y0, R-Y, B-Y, Y1) have SAME duration = scanMs
-        // Total line pair = sync + porch + 4 * scanMs
-        const linePairTime = mode.syncMs + mode.porchMs + mode.scanMs * 4;
+    // PD : synchro, palier, Y0, R-Y, B-Y, Y1 (chrominance moyennée du couple)
+    function writePDLines(w, colorData, mode, updateProgress) {
         const totalPairs = Math.floor(colorData.height / 2);
-        const samplesPerPair = Math.floor(linePairTime * samplesPerMs);
-        const totalSamples = samplesPerPair * totalPairs;
-        const buffer = new Float32Array(totalSamples);
-        let idx = 0;
-        
         for (let pair = 0; pair < totalPairs; pair++) {
             const line0 = pair * 2;
-            const line1 = pair * 2 + 1;
-            
-            // Sync (20ms @ 1200Hz)
-            idx += generateTone(buffer, idx, mode.syncFreq,
-                Math.floor(mode.syncMs * samplesPerMs), sampleRate);
-            
-            // Porch (2.08ms @ 1500Hz)
-            idx += generateTone(buffer, idx, mode.porchFreq,
-                Math.floor(mode.porchMs * samplesPerMs), sampleRate);
-            
-            // Y0 (luminance line 0)
-            idx += encodeImageLine(buffer, idx, colorData.Y[line0],
-                mode.blackFreq, mode.whiteFreq,
-                Math.floor(mode.scanMs * samplesPerMs), sampleRate);
-            
-            // R-Y (V averaged from both lines)
-            const avgV = new Uint8Array(colorData.width);
-            for (let x = 0; x < colorData.width; x++) {
-                avgV[x] = line1 < colorData.height 
-                    ? Math.round((colorData.V[line0][x] + colorData.V[line1][x]) / 2)
-                    : colorData.V[line0][x];
-            }
-            idx += encodeImageLine(buffer, idx, avgV,
-                mode.blackFreq, mode.whiteFreq,
-                Math.floor(mode.scanMs * samplesPerMs), sampleRate);
-            
-            // B-Y (U averaged from both lines)
-            const avgU = new Uint8Array(colorData.width);
-            for (let x = 0; x < colorData.width; x++) {
-                avgU[x] = line1 < colorData.height 
-                    ? Math.round((colorData.U[line0][x] + colorData.U[line1][x]) / 2)
-                    : colorData.U[line0][x];
-            }
-            idx += encodeImageLine(buffer, idx, avgU,
-                mode.blackFreq, mode.whiteFreq,
-                Math.floor(mode.scanMs * samplesPerMs), sampleRate);
-            
-            // Y1 (luminance line 1)
-            if (line1 < colorData.height) {
-                idx += encodeImageLine(buffer, idx, colorData.Y[line1],
-                    mode.blackFreq, mode.whiteFreq,
-                    Math.floor(mode.scanMs * samplesPerMs), sampleRate);
-            } else {
-                // Pad with black if odd number of lines
-                const blackLine = new Uint8Array(colorData.width);
-                idx += encodeImageLine(buffer, idx, blackLine,
-                    mode.blackFreq, mode.whiteFreq,
-                    Math.floor(mode.scanMs * samplesPerMs), sampleRate);
-            }
-            
-            if (enableSmooth) {
-                smoothLineTransition(buffer, idx, 16);
-            }
-            
+            const line1 = line0 + 1;
+            w.tone(mode.syncFreq, mode.syncMs);
+            w.tone(mode.porchFreq, mode.porchMs);
+            w.scan(colorData.Y[line0], mode.scanMs, mode.blackFreq, mode.whiteFreq);
+            w.scan(averageRows(colorData.V[line0], colorData.V[line1]), mode.scanMs, mode.blackFreq, mode.whiteFreq);
+            w.scan(averageRows(colorData.U[line0], colorData.U[line1]), mode.scanMs, mode.blackFreq, mode.whiteFreq);
+            w.scan(colorData.Y[line1], mode.scanMs, mode.blackFreq, mode.whiteFreq);
             updateProgress((pair + 1) / totalPairs * 100);
         }
-        
-        return buffer.slice(0, idx);
     }
     
     // ==========================================================================
-    // WAV CREATION
+    // FICHIER WAV : PCM 16 bits mono, en-tête RIFF canonique 44 octets
     // ==========================================================================
     
-    function createWAV(audioData, sampleRate) {
+    function createWAVBuffer(audioData, sampleRate) {
         const length = audioData.length;
         const arrayBuffer = new ArrayBuffer(44 + length * 2);
         const view = new DataView(arrayBuffer);
@@ -976,38 +755,51 @@
             }
         };
         
-        // RIFF header
         writeString(0, 'RIFF');
         view.setUint32(4, 36 + length * 2, true);
         writeString(8, 'WAVE');
-        
-        // fmt chunk
         writeString(12, 'fmt ');
-        view.setUint32(16, 16, true);           // Chunk size
-        view.setUint16(20, 1, true);            // PCM format
-        view.setUint16(22, 1, true);            // Mono
-        view.setUint32(24, sampleRate, true);   // Sample rate
-        view.setUint32(28, sampleRate * 2, true); // Byte rate
-        view.setUint16(32, 2, true);            // Block align
-        view.setUint16(34, 16, true);           // Bits per sample
-        
-        // data chunk
+        view.setUint32(16, 16, true);             // taille du bloc fmt
+        view.setUint16(20, 1, true);              // PCM
+        view.setUint16(22, 1, true);              // mono
+        view.setUint32(24, sampleRate, true);
+        view.setUint32(28, sampleRate * 2, true); // octets par seconde
+        view.setUint16(32, 2, true);              // octets par échantillon
+        view.setUint16(34, 16, true);             // bits par échantillon
         writeString(36, 'data');
         view.setUint32(40, length * 2, true);
         
-        // Audio data
         let offset = 44;
         for (let i = 0; i < length; i++) {
             const sample = Math.max(-1, Math.min(1, audioData[i]));
-            view.setInt16(offset, sample * 0x7FFF, true);
+            view.setInt16(offset, Math.round(sample * 32767), true);
             offset += 2;
         }
         
-        return new Blob([arrayBuffer], { type: 'audio/wav' });
+        return arrayBuffer;
+    }
+    
+    // Signal complet (mire, VIS, image) → WAV
+    function buildWAV(imageData, modeName, options, updateProgress) {
+        const mode = SSTV_MODES[modeName];
+        const progress = updateProgress || (() => {});
+        const colorData = mode.colorMode === 'gbr' ? rgbToGBR(imageData) : rgbToYUV(imageData);
+        const w = new SignalWriter(SAMPLE_RATE);
+        
+        if (options.includeCalibration) w.tone(1900, 1000);
+        if (options.includeVIS) writeVIS(w, mode.visCode);
+        
+        if (mode.lineSequence === 'gbr_sequential') writeMartinLines(w, colorData, mode, progress);
+        else if (mode.lineSequence === 'scottie') writeScottieLines(w, colorData, mode, progress);
+        else if (mode.lineSequence === 'pd') writePDLines(w, colorData, mode, progress);
+        else writeRobotLines(w, colorData, mode, progress);
+        
+        const samples = w.samples();
+        return { wav: createWAVBuffer(samples, SAMPLE_RATE), seconds: samples.length / SAMPLE_RATE };
     }
     
     // ==========================================================================
-    // MAIN ENCODE HANDLER
+    // ENCODAGE (interface)
     // ==========================================================================
     
     function handleEncode() {
@@ -1024,18 +816,14 @@
         status.style.display = 'block';
         errorDiv.style.display = 'none';
         
-        // Reset phase for each encoding
-        globalPhase = 0;
-        
         const modeName = document.getElementById('sstvMode').value;
         const mode = SSTV_MODES[modeName];
-        const sampleRate = parseInt(document.getElementById('sampleRate').value);
-        const includeVIS = document.getElementById('includeVIS').checked;
-        const enableLPF = document.getElementById('enableLPF').checked;
-        const enableSmooth = document.getElementById('enableSmooth').checked;
-        const includeCalibration = document.getElementById('includeCalibration').checked;
+        const options = {
+            includeVIS: document.getElementById('includeVIS').checked,
+            includeCalibration: document.getElementById('includeCalibration').checked
+        };
         
-        // Re-normalize image for selected mode
+        // Remise à l'échelle de l'image pour le mode choisi
         const canvas = document.getElementById('canvas');
         if (canvas.width !== mode.width || canvas.height !== mode.height) {
             const img = new Image();
@@ -1051,77 +839,12 @@
         
         function performEncode() {
             try {
-                status.textContent = 'Conversion des couleurs...';
-                
-                // Convert to appropriate color space
-                let colorData;
-                if (mode.colorMode === 'gbr') {
-                    colorData = rgbToGBR(imageData);
-                } else {
-                    colorData = rgbToYUV(imageData);
-                }
-                
                 status.textContent = `Encodage ${mode.name}...`;
-                
-                const buffers = [];
-                let totalLength = 0;
-                
-                // Calibration tone
-                if (includeCalibration) {
-                    const calSamples = sampleRate; // 1 second
-                    const calBuffer = new Float32Array(calSamples);
-                    generateTone(calBuffer, 0, 1900, calSamples, sampleRate);
-                    buffers.push(calBuffer);
-                    totalLength += calBuffer.length;
-                }
-                
-                // VIS code
-                if (includeVIS) {
-                    const visBuffer = generateVISCode(mode.visCode, sampleRate);
-                    buffers.push(visBuffer);
-                    totalLength += visBuffer.length;
-                }
-                
-                // Progress callback
-                const updateProgress = (percent) => {
+                const result = buildWAV(imageData, modeName, options, percent => {
                     progressFill.style.width = percent + '%';
-                };
+                });
                 
-                // Encode based on mode type
-                let linesBuffer;
-                if (mode.lineSequence === 'gbr_sequential') {
-                    linesBuffer = encodeMartinLines(colorData, mode, sampleRate, updateProgress, enableSmooth);
-                } else if (mode.lineSequence === 'scottie') {
-                    linesBuffer = encodeScottieLines(colorData, mode, sampleRate, updateProgress, enableSmooth);
-                } else if (mode.lineSequence === 'pd') {
-                    linesBuffer = encodePDLines(colorData, mode, sampleRate, updateProgress, enableSmooth);
-                } else {
-                    // Robot modes (yuv_interleaved or y_only)
-                    linesBuffer = encodeRobotLines(colorData, mode, sampleRate, updateProgress, enableSmooth);
-                }
-                
-                // Apply low-pass filter if enabled
-                if (enableLPF) {
-                    status.textContent = 'Application du filtre passe-bas...';
-                    applyLowPassFilter(linesBuffer, 0.12);
-                }
-                
-                buffers.push(linesBuffer);
-                totalLength += linesBuffer.length;
-                
-                // Merge all buffers
-                status.textContent = 'Création du fichier WAV...';
-                const audioData = new Float32Array(totalLength);
-                let offset = 0;
-                for (const buffer of buffers) {
-                    audioData.set(buffer, offset);
-                    offset += buffer.length;
-                }
-                
-                // Create WAV
-                const wavBlob = createWAV(audioData, sampleRate);
-                
-                // Download
+                const wavBlob = new Blob([result.wav], { type: 'audio/wav' });
                 const url = URL.createObjectURL(wavBlob);
                 const a = document.createElement('a');
                 a.href = url;
@@ -1129,9 +852,8 @@
                 a.click();
                 URL.revokeObjectURL(url);
                 
-                const duration = (audioData.length / sampleRate).toFixed(1);
                 const sizeKB = Math.round(wavBlob.size / 1024);
-                status.textContent = `✓ Encodage terminé ! Durée: ${duration}s | Taille: ${sizeKB} KB`;
+                status.textContent = `✓ Encodage terminé ! Durée: ${result.seconds.toFixed(1)}s | Taille: ${sizeKB} KB | PCM 16 bits mono 44 100 Hz`;
                 status.style.borderLeftColor = '#00ff88';
                 
             } catch (error) {
