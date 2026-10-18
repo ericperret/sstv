@@ -2,28 +2,39 @@
 <!--
 ================================================================================
   Nom        : sstv_diagnostic.html
-  Objet      : diagnostic d'un enregistrement SSTV (WAV) : code VIS, impulsions
-               de synchronisation, durée de ligne, tracé de fréquence mesurable
+  Objet      : diagnostic d'un enregistrement SSTV (WAV) : code VIS, synchros
+               mesurées ligne par ligne, période et dérive d'horloge, tracé
+               de fréquence mesurable au clic
   Auteur     : Eric PERRET
-  Date       : 2026-01-17
+  Version    : 2.0
+  Date       : 2026-10-18
   Plateforme : HTML / CSS / JavaScript, fichier unique, aucune librairie
+  Langue     : français ou anglais selon le navigateur
+  Historique :
+    1.0 (2026-01-17) version initiale
+    2.0 (2026-10-18) réécrit sur le moteur du décodeur 1.7 : lecture de tout
+                     WAV, VIS conforme, 11 modes, fins de synchro mesurées et
+                     droite des moindres carrés, dérive cumulée, tracé des
+                     écarts de synchro, interface bilingue, aucun journal
 ================================================================================
 -->
-<html lang="fr">
+<html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SSTV Diagnostic Tool</title>
+    <title>SSTV Diagnostic 2.0</title>
     <style>
+        * { box-sizing: border-box; }
         body {
-            font-family: 'Consolas', monospace;
+            font-family: 'Consolas', 'Monaco', monospace;
             background: #0a0a0f;
             color: #00ff00;
             padding: 20px;
             margin: 0;
         }
         .container { max-width: 1400px; margin: 0 auto; }
-        h1 { color: #00ffff; text-align: center; }
+        h1 { color: #00ffff; text-align: center; margin-bottom: 4px; }
+        .subtitle { text-align: center; color: #888; margin-top: 0; }
         .panel {
             background: #0f0f18;
             border: 1px solid #00ff00;
@@ -32,537 +43,871 @@
             margin: 15px 0;
         }
         .panel h3 { color: #00ffff; margin-top: 0; border-bottom: 1px solid #333; padding-bottom: 10px; }
-        canvas {
-            width: 100%;
-            background: #000;
-            border: 1px solid #333;
-            cursor: crosshair;
-        }
-        button, input[type="file"] {
+        canvas { width: 100%; background: #000; border: 1px solid #333; display: block; }
+        #freqCanvas { cursor: crosshair; touch-action: manipulation; }
+        input[type="file"], select {
             background: #0a0a10;
             border: 1px solid #00ff00;
             color: #00ff00;
             padding: 10px 15px;
-            margin: 5px;
-            cursor: pointer;
+            margin: 5px 0;
             border-radius: 4px;
+            font-family: inherit;
         }
-        button:hover { background: #00ff00; color: #000; }
-        .info { background: #001100; padding: 10px; border-radius: 4px; margin: 10px 0; font-size: 12px; }
-        .log { background: #000; padding: 10px; height: 200px; overflow-y: auto; font-size: 11px; border: 1px solid #333; }
-        .marker { color: #ff0; }
-        .error { color: #f44; }
-        .success { color: #4f4; }
-        table { width: 100%; border-collapse: collapse; }
-        td, th { border: 1px solid #333; padding: 5px; text-align: left; }
-        th { background: #001100; }
-        #cursor-info {
-            position: fixed;
-            top: 10px;
-            right: 10px;
-            background: rgba(0,0,0,0.9);
-            border: 1px solid #00ff00;
-            padding: 10px;
-            font-size: 12px;
-            z-index: 1000;
+        .info { background: #001100; padding: 10px; border-radius: 4px; margin: 10px 0; font-size: 13px; }
+        .warn { color: #ffcc00; }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        td, th { border: 1px solid #333; padding: 6px; text-align: left; }
+        th { background: #001100; color: #00ffff; }
+        td.num { text-align: right; white-space: nowrap; }
+        .zoom-controls { display: flex; gap: 10px; align-items: center; margin: 10px 0; flex-wrap: wrap; }
+        .zoom-controls input[type="range"] { flex: 1; min-width: 120px; accent-color: #00ff00; }
+        #measure { font-size: 13px; margin-top: 8px; min-height: 1.4em; }
+        @media (max-width: 600px) {
+            body { padding: 6px; }
+            .panel { padding: 10px; }
         }
-        .zoom-controls { display: flex; gap: 10px; align-items: center; margin: 10px 0; }
-        input[type="range"] { flex: 1; accent-color: #00ff00; }
     </style>
 </head>
 <body>
 <div class="container">
-    <h1>🔬 SSTV Diagnostic Tool</h1>
+    <h1>🔬 SSTV Diagnostic</h1>
+    <p class="subtitle" data-t="subtitle"></p>
     
     <div class="panel">
-        <h3>1. Load WAV File</h3>
-        <input type="file" id="fileInput" accept=".wav">
+        <h3 data-t="h_file"></h3>
+        <input type="file" id="fileInput" accept=".wav,audio/wav">
         <div id="fileInfo" class="info" style="display:none;"></div>
     </div>
     
     <div class="panel">
-        <h3>2. Signal Analysis</h3>
-        <button onclick="analyzeSignal()">🔍 Analyze</button>
-        <button onclick="findVIS()">📡 Find VIS</button>
-        <button onclick="findSyncPulses()">⚡ Find Syncs</button>
-        <button onclick="measureLine()">📏 Measure Line</button>
+        <h3 data-t="h_results"></h3>
+        <label data-t="mode_label"></label>
+        <select id="modeSelect">
+            <option value="auto" data-t="mode_auto"></option>
+            <optgroup label="Robot">
+                <option value="robot36">Robot36</option>
+                <option value="robot72">Robot72</option>
+            </optgroup>
+            <optgroup label="Martin">
+                <option value="martinM1">Martin M1</option>
+                <option value="martinM2">Martin M2</option>
+            </optgroup>
+            <optgroup label="Scottie">
+                <option value="scottieS1">Scottie S1</option>
+                <option value="scottieS2">Scottie S2</option>
+            </optgroup>
+            <optgroup label="PD">
+                <option value="pd90">PD90</option>
+                <option value="pd120">PD120</option>
+                <option value="pd160">PD160</option>
+                <option value="pd180">PD180</option>
+                <option value="pd240">PD240</option>
+            </optgroup>
+        </select>
+        <div id="status" class="info warn" style="display:none;"></div>
+        <table id="results"></table>
     </div>
     
     <div class="panel">
-        <h3>3. Frequency Plot (click to measure)</h3>
+        <h3 data-t="h_drift"></h3>
+        <canvas id="driftCanvas" height="220"></canvas>
+    </div>
+    
+    <div class="panel">
+        <h3 data-t="h_freq"></h3>
         <div class="zoom-controls">
-            <span>Zoom:</span>
-            <input type="range" id="zoomRange" min="1" max="100" value="1" onchange="updateZoom()">
+            <span data-t="zoom"></span>
+            <input type="range" id="zoomRange" min="0" max="200" value="0">
             <span id="zoomLabel">1x</span>
-            <span>Offset:</span>
-            <input type="range" id="offsetRange" min="0" max="100" value="0" onchange="updateZoom()">
+            <span data-t="position"></span>
+            <input type="range" id="offsetRange" min="0" max="1000" value="0">
         </div>
-        <canvas id="freqCanvas" height="200"></canvas>
-        <div id="cursor-info">
-            Time: --<br>
-            Freq: --<br>
-            Sample: --
-        </div>
-    </div>
-    
-    <div class="panel">
-        <h3>4. Detected Markers</h3>
-        <table id="markersTable">
-            <tr><th>Type</th><th>Time (ms)</th><th>Sample</th><th>Freq (Hz)</th><th>Duration</th></tr>
-        </table>
-    </div>
-    
-    <div class="panel">
-        <h3>5. Timing Analysis</h3>
-        <div id="timingAnalysis" class="info">Load a file and click Analyze</div>
-    </div>
-    
-    <div class="panel">
-        <h3>6. Log</h3>
-        <div id="logArea" class="log"></div>
+        <canvas id="freqCanvas" height="220"></canvas>
+        <div id="measure"></div>
     </div>
 </div>
 
 <script>
-const SAMPLE_RATE = 44100;
-const FREQ = { SYNC: 1200, BLACK: 1500, WHITE: 2300, VIS_LEADER: 1900, VIS_BIT1: 1100, VIS_BIT0: 1300 };
-
-let audioData = null;
-let freqData = null;
-let markers = [];
-let zoomLevel = 1;
-let zoomOffset = 0;
-
-// Load WAV
-document.getElementById('fileInput').addEventListener('change', async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
+    // Valeurs : J.L. Barber N7CXI, « Proposal for SSTV Mode Specifications »,
+    // Dayton 2000. family : famille proposée en réception micro.
+    const SSTV_MODES = {
+        robot36:   { name: 'Robot36',    family: 'robot',   visCode: 0x08, width: 320, height: 240, lineSequence: 'robot36',
+                     syncMs: 9, porchMs: 3, scanMs: 88, separatorMs: 4.5, chromaPorchMs: 1.5, chromaMs: 44 },
+        robot72:   { name: 'Robot72',    family: 'robot',   visCode: 0x0C, width: 320, height: 240, lineSequence: 'robot72',
+                     syncMs: 9, porchMs: 3, scanMs: 138, separatorMs: 4.5, chromaPorchMs: 1.5, chromaMs: 69 },
+        martinM1:  { name: 'Martin M1',  family: 'martin',  visCode: 0x2C, width: 320, height: 256, lineSequence: 'martin',
+                     syncMs: 4.862, porchMs: 0.572, separatorMs: 0.572, scanMs: 146.432 },
+        martinM2:  { name: 'Martin M2',  family: 'martin',  visCode: 0x28, width: 320, height: 256, lineSequence: 'martin',
+                     syncMs: 4.862, porchMs: 0.572, separatorMs: 0.572, scanMs: 73.216 },
+        scottieS1: { name: 'Scottie S1', family: 'scottie', visCode: 0x3C, width: 320, height: 256, lineSequence: 'scottie',
+                     syncMs: 9, porchMs: 1.5, separatorMs: 1.5, scanMs: 138.240 },
+        scottieS2: { name: 'Scottie S2', family: 'scottie', visCode: 0x38, width: 320, height: 256, lineSequence: 'scottie',
+                     syncMs: 9, porchMs: 1.5, separatorMs: 1.5, scanMs: 88.064 },
+        pd90:      { name: 'PD90',       family: 'pd',      visCode: 0x63, width: 320, height: 256, lineSequence: 'pd',
+                     syncMs: 20, porchMs: 2.08, scanMs: 170.240 },
+        pd120:     { name: 'PD120',      family: 'pd',      visCode: 0x5F, width: 640, height: 496, lineSequence: 'pd',
+                     syncMs: 20, porchMs: 2.08, scanMs: 121.6 },
+        pd160:     { name: 'PD160',      family: 'pd',      visCode: 0x62, width: 512, height: 400, lineSequence: 'pd',
+                     syncMs: 20, porchMs: 2.08, scanMs: 195.584 },
+        pd180:     { name: 'PD180',      family: 'pd',      visCode: 0x60, width: 640, height: 496, lineSequence: 'pd',
+                     syncMs: 20, porchMs: 2.08, scanMs: 183.04 },
+        pd240:     { name: 'PD240',      family: 'pd',      visCode: 0x61, width: 640, height: 496, lineSequence: 'pd',
+                     syncMs: 20, porchMs: 2.08, scanMs: 244.48 }
+    };
     
-    log('Loading: ' + file.name);
-    const arrayBuffer = await file.arrayBuffer();
-    parseWAV(arrayBuffer);
-});
 
-function parseWAV(arrayBuffer) {
-    const view = new DataView(arrayBuffer);
-    let offset = 12;
-    let bitsPerSample = 16;
-    let sr = 44100;
+    // VIS code mapping
+    const VIS_TO_MODE = {};
+    for (const [key, mode] of Object.entries(SSTV_MODES)) {
+        VIS_TO_MODE[mode.visCode] = key;
+    }
     
-    while (offset < arrayBuffer.byteLength - 8) {
-        const id = String.fromCharCode(view.getUint8(offset), view.getUint8(offset+1), view.getUint8(offset+2), view.getUint8(offset+3));
-        const size = view.getUint32(offset + 4, true);
+    // SSTV frequency constants
+    const FREQ = {
+        SYNC: 1200,
+        BLACK: 1500,
+        WHITE: 2300,
+        RANGE: 800,  // WHITE - BLACK
+        VIS_LEADER: 1900,
+        VIS_BREAK: 1200,
+        VIS_ONE: 1100,
+        VIS_ZERO: 1300
+    };
+    
+
+    function demodulateZeroCrossing(samples, sampleRate, outputLength = null) {
+        const n = samples.length;
+        const freqs = new Float32Array(outputLength || n);
         
-        if (id === 'fmt ') {
-            sr = view.getUint32(offset + 12, true);
-            bitsPerSample = view.getUint16(offset + 22, true);
-        }
-        if (id === 'data') {
-            const samples = size / (bitsPerSample / 8);
-            audioData = new Float32Array(samples);
-            for (let i = 0; i < samples; i++) {
-                audioData[i] = view.getInt16(offset + 8 + i * 2, true) / 32768.0;
+        let crossings = [];
+        let lastSign = samples[0] >= 0 ? 1 : -1;
+        
+        // Find all zero crossings with sub-sample interpolation
+        for (let i = 1; i < n; i++) {
+            const sign = samples[i] >= 0 ? 1 : -1;
+            if (sign !== lastSign) {
+                // Linear interpolation for exact crossing point
+                const frac = Math.abs(samples[i-1]) / (Math.abs(samples[i-1]) + Math.abs(samples[i]));
+                crossings.push(i - 1 + frac);
+                lastSign = sign;
             }
-            break;
         }
-        offset += 8 + size;
-        if (size % 2) offset++;
-    }
-    
-    const duration = (audioData.length / sr).toFixed(2);
-    document.getElementById('fileInfo').style.display = 'block';
-    document.getElementById('fileInfo').innerHTML = `Sample Rate: ${sr}Hz | Duration: ${duration}s | Samples: ${audioData.length.toLocaleString()}`;
-    log(`Loaded: ${sr}Hz, ${duration}s, ${audioData.length} samples`, 'success');
-    
-    // Demodulate
-    log('Demodulating...');
-    freqData = demodulate(audioData);
-    log('Demodulation complete', 'success');
-    
-    drawFreqPlot();
-}
-
-function demodulate(samples) {
-    const n = samples.length;
-    const freqs = new Float32Array(n);
-    
-    let crossings = [];
-    let lastSign = samples[0] >= 0 ? 1 : -1;
-    
-    for (let i = 1; i < n; i++) {
-        const sign = samples[i] >= 0 ? 1 : -1;
-        if (sign !== lastSign) {
-            const frac = Math.abs(samples[i-1]) / (Math.abs(samples[i-1]) + Math.abs(samples[i]));
-            crossings.push(i - 1 + frac);
-            lastSign = sign;
-        }
-    }
-    
-    if (crossings.length < 2) { freqs.fill(1500); return freqs; }
-    
-    for (let i = 1; i < crossings.length; i++) {
-        const halfPeriod = crossings[i] - crossings[i-1];
-        const freq = SAMPLE_RATE / (halfPeriod * 2);
         
-        if (freq >= 900 && freq <= 2600) {
-            const start = Math.floor(crossings[i-1]);
-            const end = Math.min(Math.floor(crossings[i]), n - 1);
-            for (let j = start; j <= end; j++) freqs[j] = freq;
+        // Convert crossings to instantaneous frequency
+        if (crossings.length < 2) {
+            freqs.fill(1500);
+            return freqs;
         }
-    }
-    
-    // Fill gaps
-    let last = 1500;
-    for (let i = 0; i < n; i++) {
-        if (freqs[i] === 0) freqs[i] = last;
-        else last = freqs[i];
-    }
-    
-    // Light smoothing
-    const out = new Float32Array(n);
-    let s = freqs[0];
-    for (let i = 0; i < n; i++) {
-        s = 0.7 * s + 0.3 * freqs[i];
-        out[i] = s;
-    }
-    
-    return out;
-}
-
-function drawFreqPlot() {
-    if (!freqData) return;
-    
-    const canvas = document.getElementById('freqCanvas');
-    const ctx = canvas.getContext('2d');
-    canvas.width = canvas.clientWidth;
-    const w = canvas.width, h = canvas.height;
-    
-    ctx.fillStyle = '#000';
-    ctx.fillRect(0, 0, w, h);
-    
-    // Calculate view range
-    const totalSamples = freqData.length;
-    const viewSamples = Math.floor(totalSamples / zoomLevel);
-    const startSample = Math.floor(zoomOffset * (totalSamples - viewSamples));
-    const endSample = startSample + viewSamples;
-    
-    // Draw frequency guides
-    ctx.strokeStyle = '#222';
-    ctx.fillStyle = '#444';
-    ctx.font = '10px monospace';
-    for (const f of [1200, 1500, 1900, 2300]) {
-        const y = h - ((f - 1000) / 1500) * h;
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(w, y);
-        ctx.stroke();
-        ctx.fillText(f + 'Hz', 5, y - 2);
-    }
-    
-    // Draw frequency trace
-    ctx.strokeStyle = '#00ffff';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    
-    const step = Math.max(1, Math.floor(viewSamples / w));
-    for (let x = 0; x < w; x++) {
-        const sampleIdx = startSample + Math.floor(x * viewSamples / w);
-        if (sampleIdx >= freqData.length) break;
         
-        const freq = freqData[sampleIdx];
-        const y = h - ((freq - 1000) / 1500) * h;
-        
-        if (x === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
-    }
-    ctx.stroke();
-    
-    // Draw markers
-    ctx.fillStyle = '#ff0';
-    for (const m of markers) {
-        if (m.sample >= startSample && m.sample <= endSample) {
-            const x = (m.sample - startSample) / viewSamples * w;
-            ctx.beginPath();
-            ctx.arc(x, 10, 5, 0, Math.PI * 2);
-            ctx.fill();
+        let freqIdx = 0;
+        for (let i = 1; i < crossings.length; i++) {
+            const halfPeriod = crossings[i] - crossings[i-1];
+            const freq = sampleRate / (halfPeriod * 2);
+            
+            // Only accept valid SSTV frequencies
+            if (freq >= 1000 && freq <= 2500) {
+                const startSample = Math.floor(crossings[i-1]);
+                const endSample = Math.min(Math.floor(crossings[i]), freqs.length - 1);
+                
+                for (let j = startSample; j <= endSample; j++) {
+                    if (j < freqs.length) freqs[j] = freq;
+                }
+            }
         }
-    }
-    
-    // Time axis
-    ctx.fillStyle = '#666';
-    const startMs = startSample / SAMPLE_RATE * 1000;
-    const endMs = endSample / SAMPLE_RATE * 1000;
-    const step_ms = Math.pow(10, Math.floor(Math.log10((endMs - startMs) / 5)));
-    for (let t = Math.ceil(startMs / step_ms) * step_ms; t < endMs; t += step_ms) {
-        const x = (t - startMs) / (endMs - startMs) * w;
-        ctx.fillText(t.toFixed(1) + 'ms', x, h - 5);
-    }
-}
-
-function updateZoom() {
-    zoomLevel = Math.pow(10, document.getElementById('zoomRange').value / 50);
-    zoomOffset = document.getElementById('offsetRange').value / 100;
-    document.getElementById('zoomLabel').textContent = zoomLevel.toFixed(1) + 'x';
-    drawFreqPlot();
-}
-
-// Mouse tracking
-document.getElementById('freqCanvas').addEventListener('mousemove', (e) => {
-    if (!freqData) return;
-    
-    const canvas = e.target;
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const w = canvas.width;
-    
-    const totalSamples = freqData.length;
-    const viewSamples = Math.floor(totalSamples / zoomLevel);
-    const startSample = Math.floor(zoomOffset * (totalSamples - viewSamples));
-    
-    const sample = Math.floor(startSample + (x / w) * viewSamples);
-    const time = sample / SAMPLE_RATE * 1000;
-    const freq = freqData[sample] || 0;
-    
-    document.getElementById('cursor-info').innerHTML = 
-        `Time: ${time.toFixed(2)}ms<br>Freq: ${freq.toFixed(0)}Hz<br>Sample: ${sample}`;
-});
-
-document.getElementById('freqCanvas').addEventListener('click', (e) => {
-    if (!freqData) return;
-    
-    const canvas = e.target;
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const w = canvas.width;
-    
-    const totalSamples = freqData.length;
-    const viewSamples = Math.floor(totalSamples / zoomLevel);
-    const startSample = Math.floor(zoomOffset * (totalSamples - viewSamples));
-    
-    const sample = Math.floor(startSample + (x / w) * viewSamples);
-    const time = sample / SAMPLE_RATE * 1000;
-    const freq = freqData[sample] || 0;
-    
-    addMarker('click', sample, freq);
-    log(`Marker at ${time.toFixed(2)}ms, ${freq.toFixed(0)}Hz, sample ${sample}`, 'marker');
-});
-
-function addMarker(type, sample, freq, duration = 0) {
-    markers.push({ type, sample, freq, duration });
-    updateMarkersTable();
-    drawFreqPlot();
-}
-
-function updateMarkersTable() {
-    const table = document.getElementById('markersTable');
-    table.innerHTML = '<tr><th>Type</th><th>Time (ms)</th><th>Sample</th><th>Freq (Hz)</th><th>Duration</th></tr>';
-    for (const m of markers) {
-        const time = (m.sample / SAMPLE_RATE * 1000).toFixed(2);
-        const dur = m.duration ? (m.duration / SAMPLE_RATE * 1000).toFixed(2) + 'ms' : '--';
-        table.innerHTML += `<tr><td>${m.type}</td><td>${time}</td><td>${m.sample}</td><td>${m.freq.toFixed(0)}</td><td>${dur}</td></tr>`;
-    }
-}
-
-function analyzeSignal() {
-    if (!freqData) { log('Load a file first', 'error'); return; }
-    
-    markers = [];
-    log('Analyzing signal...');
-    
-    // Find frequency distribution
-    const bins = {};
-    for (let i = 0; i < freqData.length; i++) {
-        const f = Math.round(freqData[i] / 50) * 50;
-        bins[f] = (bins[f] || 0) + 1;
-    }
-    
-    log('Frequency distribution:');
-    const sorted = Object.entries(bins).sort((a,b) => b[1] - a[1]).slice(0, 10);
-    for (const [f, count] of sorted) {
-        const pct = (count / freqData.length * 100).toFixed(1);
-        log(`  ${f}Hz: ${pct}%`);
-    }
-    
-    findVIS();
-    findSyncPulses();
-}
-
-function findVIS() {
-    if (!freqData) { log('Load a file first', 'error'); return; }
-    
-    log('Searching for VIS code...');
-    
-    const samplesPerMs = SAMPLE_RATE / 1000;
-    const windowSize = Math.floor(20 * samplesPerMs);
-    
-    // Find VIS leader (1900Hz)
-    let leaderStart = -1;
-    let leaderEnd = -1;
-    
-    for (let i = 0; i < Math.min(freqData.length, SAMPLE_RATE * 5); i += Math.floor(5 * samplesPerMs)) {
-        let sum = 0;
-        for (let j = 0; j < windowSize && i + j < freqData.length; j++) sum += freqData[i + j];
-        const avg = sum / windowSize;
         
-        if (avg > 1850 && avg < 1950) {
-            if (leaderStart < 0) leaderStart = i;
-            leaderEnd = i;
-        } else if (leaderStart > 0 && i > leaderEnd + 50 * samplesPerMs) {
-            break; // End of leader region
+        // Fill gaps (areas with no valid crossings)
+        let lastValid = 1500;
+        for (let i = 0; i < freqs.length; i++) {
+            if (freqs[i] === 0) {
+                freqs[i] = lastValid;
+            } else {
+                lastValid = freqs[i];
+            }
         }
+        
+        return freqs;
+    }
+
+    function demodulateHybrid(samples, sampleRate) {
+        const n = samples.length;
+        
+        // Use zero-crossing as primary (most reliable for clean signals)
+        const freqZC = demodulateZeroCrossing(samples, sampleRate);
+        
+        // Apply median filter to remove spikes (3-tap)
+        const freqs = new Float32Array(n);
+        for (let i = 1; i < n - 1; i++) {
+            const a = freqZC[i-1], b = freqZC[i], c = freqZC[i+1];
+            // Median of 3
+            if ((a <= b && b <= c) || (c <= b && b <= a)) {
+                freqs[i] = b;
+            } else if ((b <= a && a <= c) || (c <= a && a <= b)) {
+                freqs[i] = a;
+            } else {
+                freqs[i] = c;
+            }
+        }
+        freqs[0] = freqs[1];
+        freqs[n-1] = freqs[n-2];
+        
+        // Light smoothing (exponential moving average)
+        const alpha = 0.3;
+        let smoothed = freqs[0];
+        for (let i = 0; i < n; i++) {
+            smoothed = alpha * freqs[i] + (1 - alpha) * smoothed;
+            freqs[i] = smoothed;
+        }
+        
+        return freqs;
+    }
+
+    // Indices absolus : base = indice du premier échantillon conservé
+    function FreqTrack(rate, capacity) {
+        this.rate = rate;
+        this.base = 0;
+        this.n = 0;
+        this.f = new Float32Array(Math.max(1024, capacity || rate * 10));
+        this.sum = new Float64Array(this.f.length + 1);
     }
     
-    if (leaderStart < 0) {
-        log('No VIS leader found!', 'error');
+    Object.defineProperty(FreqTrack.prototype, 'len', {
+        get() { return this.base + this.n; }      // fin (exclue), en indice absolu
+    });
+    
+    FreqTrack.prototype.push = function (values) {
+        const need = this.n + values.length;
+        if (need > this.f.length) {
+            let size = this.f.length * 2;
+            while (size < need) size *= 2;
+            const nf = new Float32Array(size); nf.set(this.f.subarray(0, this.n));
+            const ns = new Float64Array(size + 1); ns.set(this.sum.subarray(0, this.n + 1));
+            this.f = nf; this.sum = ns;
+        }
+        for (let i = 0; i < values.length; i++) {
+            this.f[this.n] = values[i];
+            this.sum[this.n + 1] = this.sum[this.n] + values[i];
+            this.n++;
+        }
+    };
+    
+    // Somme cumulée à une position fractionnaire (absolue)
+    FreqTrack.prototype.cum = function (x) {
+        const i = x - this.base;
+        if (i <= 0) return this.sum[0];
+        if (i >= this.n) return this.sum[this.n];
+        const k = Math.floor(i);
+        return this.sum[k] + (i - k) * this.f[k];
+    };
+    
+    FreqTrack.prototype.mean = function (start, end) {
+        const a = Math.max(this.base, Math.min(this.len, start));
+        const b = Math.max(this.base, Math.min(this.len, end));
+        return b > a ? (this.cum(b) - this.cum(a)) / (b - a) : 0;
+    };
+    
+    // Médiane sur un intervalle : insensible aux pointes du bruit
+    FreqTrack.prototype.median = function (start, end) {
+        const a = Math.max(0, Math.min(this.n, Math.round(start) - this.base));
+        const b = Math.max(0, Math.min(this.n, Math.round(end) - this.base));
+        if (b <= a) return 0;
+        const v = this.f.slice(a, b).sort();
+        return v[v.length >> 1];
+    };
+    
+    // Abandon des échantillons antérieurs à l'indice absolu 'from'
+    FreqTrack.prototype.dropBefore = function (from) {
+        const d = Math.min(this.n, Math.floor(from - this.base));
+        if (d <= 0) return;
+        const s0 = this.sum[d];
+        for (let k = 0; k + d <= this.n; k++) {
+            if (k + d < this.n) this.f[k] = this.f[k + d];
+            this.sum[k] = this.sum[k + d] - s0;
+        }
+        this.n -= d;
+        this.base += d;
+    };
+    
+
+    // VIS : amorce 1900 Hz, front vers le bit de start 1200 Hz (repère), 7 bits
+    // de 30 ms poids faible en premier (1100 Hz = 1, 1300 Hz = 0), parité paire,
+    // stop 1200 Hz. L'image commence à la fin du stop (repère + 300 ms).
+    // Repères examinés de 'from' à 'to' (échantillons). Résultat ou null.
+    function findVIS(track, from, to, off, logFn) {
+        const spm = track.rate / 1000;
+        const step = Math.max(1, Math.floor(spm));
+        const first = Math.max(Math.ceil(300 * spm), Math.floor(from));
+        const last = Math.min(Math.floor(to), track.len - Math.ceil(320 * spm));
+        
+        for (let e = first; e < last; e += step) {
+            // Amorce avant, bit de start après (tri grossier par moyennes)
+            const lead = track.mean(e - 250 * spm, e - 20 * spm);
+            if (Math.abs(lead - 1900 - off) > 100) continue;
+            if (Math.abs(track.mean(e + 5 * spm, e + 25 * spm) - 1200 - off) > 200) continue;
+            
+            // Front précis amorce -> start : plus forte chute de fréquence
+            // moyenne entre 5 ms avant et 5 ms après
+            let edge = -1, drop = 250;
+            for (let i = Math.floor(e - 15 * spm); i < e + 15 * spm; i++) {
+                const d = track.mean(i - 5 * spm, i) - track.mean(i, i + 5 * spm);
+                if (d > drop) { drop = d; edge = i; }
+            }
+            if (edge < 0) continue;
+            
+            // Décisions par médianes : start, 7 bits + parité, stop
+            const med = (i0, i1) => track.median(edge + i0 * spm, edge + i1 * spm) - off;
+            if (Math.abs(med(5, 25) - 1200) > 100) continue;
+            const bits = [];
+            let valid = true;
+            for (let b = 0; b < 8; b++) {
+                const m = med(30 * (b + 1) + 5, 30 * (b + 2) - 5);
+                if (Math.abs(m - 1100) > 100 && Math.abs(m - 1300) > 100) { valid = false; break; }
+                bits.push(m < 1200 ? 1 : 0);
+            }
+            if (!valid) continue;
+            if (Math.abs(med(275, 295) - 1200) > 100) continue;
+            
+            let visCode = 0, ones = 0;
+            for (let b = 0; b < 7; b++) { visCode |= bits[b] << b; ones += bits[b]; }
+            if ((ones + bits[7]) % 2 !== 0) {
+                logFn(`VIS 0x${visCode.toString(16).toUpperCase()} rejeté (parité) à ${(edge / track.rate).toFixed(3)}s`);
+                e = edge + 300 * spm;
+                continue;
+            }
+            
+            const imageStart = Math.round(edge + 300 * spm);
+            logFn(`VIS start bit at ${(edge / track.rate).toFixed(4)}s, bits ${bits.slice(0, 7).join('')} parity ${bits[7]}`);
+            logFn(`VIS code: 0x${visCode.toString(16).toUpperCase()} (${visCode})`);
+            return { visCode, imageStart, edge, bits, leaderStart: Math.round(edge - 610 * spm) };
+        }
         return null;
     }
-    
-    const leaderMs = (leaderEnd - leaderStart) / samplesPerMs;
-    log(`VIS leader: ${(leaderStart/samplesPerMs).toFixed(1)}ms - ${(leaderEnd/samplesPerMs).toFixed(1)}ms (${leaderMs.toFixed(0)}ms duration)`, 'success');
-    addMarker('VIS_LEADER', leaderStart, 1900, leaderEnd - leaderStart);
-    
-    // Expected: Leader(300) + Break(10) + Leader(300) + Bits(8*30=240) + Parity(30) + Stop(30) = 910ms
-    // But we look for bits starting at leader + 620ms
-    
-    const bitsStart = leaderStart + Math.floor(620 * samplesPerMs);
-    const bitDuration = Math.floor(30 * samplesPerMs);
-    
-    log('Reading VIS bits:');
-    let visCode = 0;
-    for (let bit = 0; bit < 8; bit++) {
-        const bitCenter = bitsStart + bit * bitDuration + bitDuration / 2;
-        
-        let sum = 0;
-        const win = Math.floor(10 * samplesPerMs);
-        for (let j = 0; j < win; j++) {
-            const idx = bitCenter - win/2 + j;
-            if (idx >= 0 && idx < freqData.length) sum += freqData[idx];
-        }
-        const avgFreq = sum / win;
-        
-        const bitVal = avgFreq < 1200 ? 1 : 0;
-        visCode |= (bitVal << bit);
-        
-        log(`  Bit ${bit}: ${avgFreq.toFixed(0)}Hz -> ${bitVal}`);
-        addMarker(`BIT_${bit}`, bitCenter, avgFreq);
-    }
-    
-    log(`VIS Code: 0x${visCode.toString(16).toUpperCase()} (${visCode})`, 'success');
-    
-    // Decode mode
-    const modes = {
-        0x08: 'Robot36', 0x0C: 'Robot72',
-        0x2C: 'Martin M1', 0x28: 'Martin M2',
-        0x3C: 'Scottie S1', 0x38: 'Scottie S2',
-        0x5F: 'PD120', 0x60: 'PD180', 0x63: 'PD90', 0x61: 'PD240'
-    };
-    const modeName = modes[visCode] || 'UNKNOWN';
-    log(`Mode: ${modeName}`, modeName === 'UNKNOWN' ? 'error' : 'success');
-    
-    // Image start
-    const imageStart = bitsStart + 10 * bitDuration; // 8 data + parity + stop
-    log(`Image starts at: ${(imageStart/samplesPerMs).toFixed(2)}ms (sample ${imageStart})`, 'marker');
-    addMarker('IMAGE_START', imageStart, freqData[imageStart] || 1500);
-    
-    return { visCode, imageStart, leaderStart };
-}
 
-function findSyncPulses() {
-    if (!freqData) { log('Load a file first', 'error'); return; }
-    
-    log('Searching for sync pulses (1200Hz)...');
-    
-    const samplesPerMs = SAMPLE_RATE / 1000;
-    const minSyncMs = 4; // Minimum sync duration
-    const maxSyncMs = 25; // Maximum sync duration
-    
-    const syncs = [];
-    let inSync = false;
-    let syncStart = 0;
-    
-    for (let i = 0; i < freqData.length; i += Math.floor(1 * samplesPerMs)) {
-        const freq = freqData[i];
+    // Fin de synchro (montée 1200 -> 1500 Hz, seuil 1350 Hz, fréquence lissée
+    // sur ±0,4 ms) la plus proche de 'expected' dans ±winMs ; position
+    // fractionnaire en échantillons, ou -1
+    function findSyncEnd(track, expected, winMs, syncMs, off) {
+        const spm = track.rate / 1000;
+        const hi = Math.max(1, Math.round(0.4 * spm));    // demi-fenêtre de lissage
+        const thr = 1350 + off;
+        const a = Math.max(track.base + hi + 1, Math.floor(expected - winMs * spm));
+        const b = Math.min(track.len - Math.ceil(3 * spm), Math.ceil(expected + winMs * spm));
+        if (b < a) return -1;
+        const S = track.sum, base = track.base, inv = 1 / (2 * hi);
+        let best = -1, bestDist = Infinity;
+        let prev = (S[a - 1 - base + hi] - S[a - 1 - base - hi]) * inv;
         
-        if (freq > 1100 && freq < 1300) {
-            if (!inSync) {
-                syncStart = i;
-                inSync = true;
-            }
-        } else {
-            if (inSync) {
-                const duration = (i - syncStart) / samplesPerMs;
-                if (duration >= minSyncMs && duration <= maxSyncMs) {
-                    syncs.push({ start: syncStart, end: i, duration });
+        for (let i = a; i <= b; i++) {
+            const j = i - base;
+            const cur = (S[j + hi] - S[j - hi]) * inv;
+            if (prev < thr && cur >= thr) {
+                const pos = i - 1 + (thr - prev) / (cur - prev);
+                if (track.mean(pos - 0.8 * syncMs * spm, pos - 0.5 * spm) < thr &&
+                    track.mean(pos + 0.3 * spm, pos + 2.5 * spm) > thr) {
+                    const d = Math.abs(pos - expected);
+                    if (d < bestDist) { bestDist = d; best = pos; }
                 }
-                inSync = false;
+            }
+            prev = cur;
+        }
+        return best;
+    }
+
+    // Droite des moindres carrés pos = a + b * ligne, avec rejet des écarts > 1 ms
+    function fitLine(points, spm) {
+        let pts = points;
+        let a = 0, b = 0;
+        for (let pass = 0; pass < 3; pass++) {
+            const n = pts.length;
+            if (n < 2) break;
+            let sx = 0, sy = 0, sxx = 0, sxy = 0;
+            for (const [x, y] of pts) { sx += x; sy += y; sxx += x * x; sxy += x * y; }
+            b = (n * sxy - sx * sy) / (n * sxx - sx * sx);
+            a = (sy - b * sx) / n;
+            pts = points.filter(([x, y]) => Math.abs(y - (a + b * x)) < spm);
+        }
+        return { a, b, used: pts.length };
+    }
+
+    // Structure d'un mode : période entre synchros, fin de la première synchro
+    // depuis le début d'image, segments placés depuis la fin de synchro (ms)
+    function modeLayout(m) {
+        const L = { rowsPerSync: 1, firstSyncEnd: m.syncMs, segs: [] };
+        switch (m.lineSequence) {
+            case 'robot36': {   // Y ; séparateur 1500 (R-Y) / 2300 (B-Y) ; palier ; chrominance
+                const y = m.porchMs, sep = y + m.scanMs, c = sep + m.separatorMs + m.chromaPorchMs;
+                L.segs = [{ ch: 'Y', at: y, ms: m.scanMs }, { ch: 'C', at: c, ms: m.chromaMs }];
+                L.sepAt = sep;
+                L.period = m.syncMs + c + m.chromaMs;
+                break;
+            }
+            case 'robot72': {   // Y ; séparateur, palier, R-Y ; séparateur, palier, B-Y
+                const y = m.porchMs, gap = m.separatorMs + m.chromaPorchMs;
+                const v = y + m.scanMs + gap, u = v + m.chromaMs + gap;
+                L.segs = [{ ch: 'Y', at: y, ms: m.scanMs }, { ch: 'V', at: v, ms: m.chromaMs }, { ch: 'U', at: u, ms: m.chromaMs }];
+                L.period = m.syncMs + u + m.chromaMs;
+                break;
+            }
+            case 'martin': {    // palier, G, séparateur, B, séparateur, R, séparateur
+                const g = m.porchMs, b = g + m.scanMs + m.separatorMs, r = b + m.scanMs + m.separatorMs;
+                L.segs = [{ ch: 'G', at: g, ms: m.scanMs }, { ch: 'B', at: b, ms: m.scanMs }, { ch: 'R', at: r, ms: m.scanMs }];
+                L.period = m.syncMs + r + m.scanMs + m.separatorMs;
+                break;
+            }
+            case 'scottie': {   // séparateur, G, séparateur, B, synchro, palier, R
+                const r = m.porchMs, b = -(m.syncMs + m.scanMs), g = b - m.separatorMs - m.scanMs;
+                L.segs = [{ ch: 'G', at: g, ms: m.scanMs }, { ch: 'B', at: b, ms: m.scanMs }, { ch: 'R', at: r, ms: m.scanMs }];
+                L.period = m.syncMs + m.porchMs + 3 * m.scanMs + 2 * m.separatorMs;
+                L.firstSyncEnd = m.syncMs + 2 * (m.separatorMs + m.scanMs) + m.syncMs;   // synchro initiale
+                break;
+            }
+            case 'pd': {        // palier, Y ligne paire, R-Y, B-Y, Y ligne impaire
+                const y0 = m.porchMs;
+                L.segs = [{ ch: 'Y', at: y0, ms: m.scanMs }, { ch: 'V', at: y0 + m.scanMs, ms: m.scanMs },
+                          { ch: 'U', at: y0 + 2 * m.scanMs, ms: m.scanMs }, { ch: 'Y2', at: y0 + 3 * m.scanMs, ms: m.scanMs }];
+                L.period = m.syncMs + m.porchMs + 4 * m.scanMs;
+                L.rowsPerSync = 2;
+                break;
             }
         }
+        L.syncs = m.height / L.rowsPerSync;
+        L.maxEnd = Math.max(...L.segs.map(g => g.at + g.ms));
+        return L;
+    }
+
+    // Début d'image sans VIS : trois fins de synchro espacées d'une période
+    function findImageStart(track, modeName, from, off) {
+        const L = modeLayout(SSTV_MODES[modeName]);
+        const spm = track.rate / 1000, T = L.period * spm, syncMs = SSTV_MODES[modeName].syncMs;
+        for (let e = Math.max(from, track.base) + L.firstSyncEnd * spm; e < track.len - 2 * T; e += T / 2) {
+            const p0 = findSyncEnd(track, e, L.period / 4 + 1, syncMs, off);
+            if (p0 < 0) continue;
+            const p1 = findSyncEnd(track, p0 + T, 2, syncMs, off);
+            if (p1 < 0) continue;
+            if (findSyncEnd(track, p1 + T, 2, syncMs, off) < 0) continue;
+            return Math.max(track.base, Math.round(p0 - L.firstSyncEnd * spm));
+        }
+        return Math.max(from, track.base);
     }
     
-    log(`Found ${syncs.length} sync pulses`);
+    // ==========================================================================
+    // LANGUE : celle du navigateur, français sinon anglais
+    // ==========================================================================
     
-    // Show first 20
-    for (let i = 0; i < Math.min(20, syncs.length); i++) {
-        const s = syncs[i];
-        log(`  Sync ${i}: ${(s.start/samplesPerMs).toFixed(2)}ms, duration ${s.duration.toFixed(2)}ms`);
-        if (i < 5) addMarker(`SYNC_${i}`, s.start, 1200, s.end - s.start);
+    const LANG = (navigator.language || 'en').toLowerCase().startsWith('fr') ? 'fr' : 'en';
+    const TEXT = {
+        fr: {
+            subtitle: 'Version 2.0 — analyse d\'un enregistrement WAV',
+            h_file: '1. Fichier WAV',
+            h_results: '2. Mesures',
+            h_drift: '3. Écart des synchros au rythme nominal (ms), droite mesurée',
+            h_freq: '4. Fréquence instantanée (cliquer pour mesurer)',
+            mode_label: 'Mode : ',
+            mode_auto: 'Automatique (VIS)',
+            zoom: 'Zoom',
+            position: 'Position',
+            file_info: (r, ch, bits, d) => `${r} Hz, ${ch} voie(s), ${bits} bits, ${d} s`,
+            no_vis: 'VIS non trouvé : choisir le mode.',
+            no_sync: 'Pas assez de synchros trouvées pour mesurer l\'horloge.',
+            col_item: 'Mesure', col_meas: 'Mesuré', col_nom: 'Nominal',
+            vis_code: 'Code VIS', vis_none: 'non trouvé',
+            vis_start: 'Bit de start du VIS', image_start: 'Début d\'image',
+            leader: 'Fréquence de l\'amorce', mode: 'Mode',
+            syncs: 'Synchros trouvées / attendues', syncs_used: 'Synchros retenues pour la droite',
+            period: 'Période de ligne', clock: 'Écart d\'horloge',
+            drift: 'Dérive cumulée sur l\'image au rythme nominal',
+            pixels: 'pixels', resid: 'Écart des synchros à la droite (max / efficace)',
+            sync_len: 'Durée de synchro (médiane)', sync_freq: 'Fréquence de synchro (médiane)',
+            image_len: 'Durée de l\'image',
+            meas_a: 'A :', meas_b: 'B :', meas_d: 'Δt ='
+        },
+        en: {
+            subtitle: 'Version 2.0 — analysis of a WAV recording',
+            h_file: '1. WAV file',
+            h_results: '2. Measurements',
+            h_drift: '3. Sync deviation from nominal timing (ms), measured line',
+            h_freq: '4. Instantaneous frequency (click to measure)',
+            mode_label: 'Mode: ',
+            mode_auto: 'Automatic (VIS)',
+            zoom: 'Zoom',
+            position: 'Position',
+            file_info: (r, ch, bits, d) => `${r} Hz, ${ch} channel(s), ${bits}-bit, ${d} s`,
+            no_vis: 'VIS not found: choose the mode.',
+            no_sync: 'Not enough sync pulses found to measure the clock.',
+            col_item: 'Item', col_meas: 'Measured', col_nom: 'Nominal',
+            vis_code: 'VIS code', vis_none: 'not found',
+            vis_start: 'VIS start bit', image_start: 'Image start',
+            leader: 'Leader frequency', mode: 'Mode',
+            syncs: 'Sync pulses found / expected', syncs_used: 'Sync pulses used for the line fit',
+            period: 'Line period', clock: 'Clock error',
+            drift: 'Cumulative drift over the image at nominal timing',
+            pixels: 'pixels', resid: 'Sync deviation from the fitted line (max / RMS)',
+            sync_len: 'Sync duration (median)', sync_freq: 'Sync frequency (median)',
+            image_len: 'Image duration',
+            meas_a: 'A:', meas_b: 'B:', meas_d: 'Δt ='
+        }
+    };
+    const T = TEXT[LANG];
+    document.documentElement.lang = LANG;
+    document.querySelectorAll('[data-t]').forEach(e => { e.textContent = T[e.dataset.t]; });
+    
+    // ==========================================================================
+    // LECTURE WAV : tout PCM 8/16/24/32 bits ou flottant 32 bits, voie 1
+    // ==========================================================================
+    
+    function readWav(arrayBuffer) {
+        const view = new DataView(arrayBuffer);
+        const tag = o => String.fromCharCode(view.getUint8(o), view.getUint8(o + 1), view.getUint8(o + 2), view.getUint8(o + 3));
+        if (arrayBuffer.byteLength < 12 || tag(0) !== 'RIFF' || tag(8) !== 'WAVE') throw new Error('WAV ?');
+        let offset = 12, fmt = null;
+        while (offset + 8 <= arrayBuffer.byteLength) {
+            const id = tag(offset), size = view.getUint32(offset + 4, true), body = offset + 8;
+            if (id === 'fmt ') {
+                let format = view.getUint16(body, true);
+                if (format === 0xFFFE && size >= 40) format = view.getUint16(body + 24, true);
+                fmt = { format, channels: view.getUint16(body + 2, true), rate: view.getUint32(body + 4, true),
+                        blockAlign: view.getUint16(body + 12, true), bits: view.getUint16(body + 14, true) };
+            }
+            if (id === 'data' && fmt) {
+                const frames = Math.floor(Math.min(size, arrayBuffer.byteLength - body) / fmt.blockAlign);
+                const x = new Float32Array(frames);
+                for (let i = 0; i < frames; i++) {
+                    const p = body + i * fmt.blockAlign;
+                    if (fmt.format === 3 && fmt.bits === 32) x[i] = view.getFloat32(p, true);
+                    else if (fmt.bits === 16) x[i] = view.getInt16(p, true) / 32768;
+                    else if (fmt.bits === 8) x[i] = (view.getUint8(p) - 128) / 128;
+                    else if (fmt.bits === 24) x[i] = (view.getUint8(p) | (view.getUint8(p + 1) << 8) | (view.getInt8(p + 2) << 16)) / 8388608;
+                    else if (fmt.bits === 32) x[i] = view.getInt32(p, true) / 2147483648;
+                    else throw new Error(fmt.bits + ' bits ?');
+                }
+                return { samples: x, rate: fmt.rate, channels: fmt.channels, bits: fmt.bits };
+            }
+            offset = body + size + (size & 1);
+        }
+        throw new Error('WAV : data ?');
     }
     
-    // Calculate line timing
-    if (syncs.length >= 3) {
-        const intervals = [];
-        for (let i = 1; i < Math.min(50, syncs.length); i++) {
-            intervals.push((syncs[i].start - syncs[i-1].start) / samplesPerMs);
+    // ==========================================================================
+    // ANALYSE
+    // ==========================================================================
+    
+    let wav = null;           // fichier chargé
+    let track = null;         // piste de fréquence
+    let result = null;        // dernières mesures
+    let markA = null, markB = null;
+    
+    function loadBuffer(arrayBuffer) {
+        wav = readWav(arrayBuffer);
+        // Démodulation par blocs d'une seconde (comme le décodeur en mode fichier)
+        const n = wav.samples.length, rate = wav.rate;
+        track = new FreqTrack(rate, n + 1);
+        for (let s = 0; s < n; s += rate) {
+            track.push(demodulateHybrid(wav.samples.subarray(s, Math.min(n, s + rate)), rate));
+        }
+        markA = markB = null;
+        const info = document.getElementById('fileInfo');
+        info.style.display = 'block';
+        info.textContent = T.file_info(wav.rate, wav.channels, wav.bits, (n / rate).toFixed(2));
+        analyze();
+    }
+    
+    // Début de synchro : front descendant pris à mi-chemin entre le niveau qui
+    // précède et 1200 Hz (même critère que la fin de synchro, 1350 Hz étant
+    // le milieu entre 1200 et le palier à 1500 Hz) : durée sans biais de lissage
+    function findSyncStart(pos, syncMs) {
+        const spm = track.rate / 1000, h = 0.4 * spm;
+        let s1 = -1;
+        for (let i = pos - 0.5 * spm; i > pos - 2 * syncMs * spm; i -= 1) {
+            if (track.mean(i - h, i + h) >= 1350) { s1 = i; break; }
+        }
+        if (s1 < 0) return -1;
+        const before = track.median(s1 - 1.5 * spm, s1 - 0.3 * spm);
+        const thr = (before + 1200) / 2;
+        let prev = track.mean(s1 + 1.5 * spm - h, s1 + 1.5 * spm + h);
+        for (let i = s1 + 1.5 * spm - 1; i > s1 - 1.5 * spm; i -= 1) {
+            const cur = track.mean(i - h, i + h);
+            if (cur >= thr && prev < thr) return i + (cur - thr) / (cur - prev);
+            prev = cur;
+        }
+        return s1;
+    }
+    
+    const median = v => { if (!v.length) return NaN; const s = [...v].sort((a, b) => a - b); return s[s.length >> 1]; };
+    
+    function analyze() {
+        if (!track) return;
+        const choice = document.getElementById('modeSelect').value;
+        const vis = findVIS(track, 0, track.len, 0, () => {});
+        const modeName = choice === 'auto' ? (vis && VIS_TO_MODE[vis.visCode]) : choice;
+        const status = document.getElementById('status');
+        status.style.display = 'none';
+        result = { vis, modeName };
+        
+        if (!modeName) {
+            status.textContent = T.no_vis;
+            status.style.display = 'block';
+            drawResults();
+            drawDrift();
+            drawFreq();
+            return;
         }
         
-        const avgInterval = intervals.reduce((a,b) => a+b, 0) / intervals.length;
-        const variance = intervals.map(x => (x - avgInterval) ** 2).reduce((a,b) => a+b, 0) / intervals.length;
-        const stdDev = Math.sqrt(variance);
+        const m = SSTV_MODES[modeName], L = modeLayout(m);
+        const spm = track.rate / 1000, Tn = L.period * spm;
+        const start = vis ? vis.imageStart : findImageStart(track, modeName, 0, 0);
         
-        log(`Average sync interval: ${avgInterval.toFixed(3)}ms (stddev: ${stdDev.toFixed(3)}ms)`, 'success');
+        // Fins de synchro, suivies comme dans le décodeur
+        const all = [];
+        let recent = [], lastFound = -100, expected = start + L.firstSyncEnd * spm;
+        for (let n = 0; n < L.syncs && expected < track.len; n++) {
+            const locked = n - lastFound <= 3;
+            const pos = findSyncEnd(track, expected, locked ? 4 : L.period / 2, m.syncMs, 0);
+            if (pos >= 0) {
+                if (!locked) recent = [];
+                recent.push([n, pos]); all.push([n, pos]);
+                lastFound = n;
+            }
+            if (recent.length >= 8) {
+                const f = fitLine(recent, spm);
+                expected = f.a + f.b * (n + 1);
+            } else {
+                expected = (pos >= 0 ? pos : expected) + Tn;
+            }
+        }
         
-        document.getElementById('timingAnalysis').innerHTML = `
-            <strong>Timing Analysis:</strong><br>
-            Sync pulses found: ${syncs.length}<br>
-            Average line duration: ${avgInterval.toFixed(3)}ms<br>
-            Standard deviation: ${stdDev.toFixed(3)}ms<br>
-            <br>
-            <strong>Expected timings:</strong><br>
-            Robot36: 150.0ms (9+3+88+4.5+1.5+44)<br>
-            Robot72: 225.0ms (9+3+138+4.5+1.5+69)<br>
-            Martin M1: 446.446ms<br>
-            Scottie S1: 428.22ms<br>
-            PD120: 508.48ms per pair<br>
-            <br>
-            <strong>Deviation from Robot36:</strong> ${(avgInterval - 150).toFixed(3)}ms<br>
-            <strong>Deviation from Robot72:</strong> ${(avgInterval - 225).toFixed(3)}ms
-        `;
+        Object.assign(result, { mode: m, layout: L, start, points: all, syncsExpected: L.syncs });
+        if (all.length < 8) {
+            status.textContent = T.no_sync;
+            status.style.display = 'block';
+        } else {
+            const f = fitLine(all, spm);
+            const used = all.filter(([x, y]) => Math.abs(y - (f.a + f.b * x)) < spm);
+            const res = used.map(([x, y]) => (y - (f.a + f.b * x)) / spm);
+            const durs = [], freqs = [];
+            for (const [n, pos] of all) {
+                if (n === 0) continue;                      // première synchro collée au stop du VIS
+                const s0 = findSyncStart(pos, m.syncMs);
+                if (s0 >= 0) durs.push((pos - s0) / spm);
+                freqs.push(track.mean(pos - (m.syncMs - 1) * spm, pos - 1 * spm));
+            }
+            const pxMs = m.scanMs / m.width;
+            Object.assign(result, {
+                fit: f, used: used.length,
+                periodMs: f.b / spm,
+                ppm: (f.b / Tn - 1) * 1e6,
+                driftMs: (f.b - Tn) / spm * (L.syncs - 1),
+                residMax: Math.max(...res.map(Math.abs)),
+                residRms: Math.sqrt(res.reduce((a, r) => a + r * r, 0) / res.length),
+                syncLen: median(durs), syncFreq: median(freqs),
+                imageMs: f.b / spm * L.syncs, pxMs
+            });
+        }
+        drawResults();
+        drawDrift();
+        drawFreq();
     }
     
-    return syncs;
-}
-
-function measureLine() {
-    if (markers.length < 2) {
-        log('Click on plot to add at least 2 markers first', 'error');
-        return;
+    // ==========================================================================
+    // AFFICHAGE
+    // ==========================================================================
+    
+    const fmt = (v, d) => (v === undefined || v === null || isNaN(v)) ? '—' : v.toFixed(d);
+    const ms = i => i / track.rate * 1000;
+    
+    function drawResults() {
+        const r = result, rows = [];
+        const add = (label, meas, nom) => rows.push(`<tr><td>${label}</td><td class="num">${meas}</td><td class="num">${nom ?? ''}</td></tr>`);
+        if (r.vis) {
+            add(T.vis_code, `0x${r.vis.visCode.toString(16).toUpperCase()} (${r.vis.visCode})`, VIS_TO_MODE[r.vis.visCode] ? SSTV_MODES[VIS_TO_MODE[r.vis.visCode]].name : '?');
+            add(T.vis_start, fmt(ms(r.vis.edge), 2) + ' ms');
+            add(T.leader, fmt(track.mean(r.vis.edge - 250 * track.rate / 1000, r.vis.edge - 20 * track.rate / 1000), 1) + ' Hz', '1900 Hz');
+        } else {
+            add(T.vis_code, T.vis_none);
+        }
+        if (r.mode) {
+            const L = r.layout;
+            add(T.mode, r.mode.name);
+            add(T.image_start, fmt(ms(r.start), 2) + ' ms');
+            add(T.syncs, `${r.points.length} / ${r.syncsExpected}`);
+            if (r.fit) {
+                add(T.syncs_used, `${r.used}`);
+                add(T.period, fmt(r.periodMs, 4) + ' ms', fmt(L.period, 4) + ' ms');
+                add(T.clock, fmt(r.ppm, 0) + ' ppm', '0 ppm');
+                add(T.drift, `${fmt(r.driftMs, 2)} ms (${fmt(r.driftMs / r.pxMs, 1)} ${T.pixels})`, '0 ms');
+                add(T.resid, `${fmt(r.residMax, 3)} / ${fmt(r.residRms, 3)} ms`, '0 ms');
+                add(T.sync_len, fmt(r.syncLen, 2) + ' ms', fmt(r.mode.syncMs, 3) + ' ms');
+                add(T.sync_freq, fmt(r.syncFreq, 1) + ' Hz', '1200 Hz');
+                add(T.image_len, fmt(r.imageMs / 1000, 3) + ' s', fmt(L.period * L.syncs / 1000, 3) + ' s');
+            }
+        }
+        document.getElementById('results').innerHTML =
+            `<tr><th>${T.col_item}</th><th>${T.col_meas}</th><th>${T.col_nom}</th></tr>` + rows.join('');
     }
     
-    const last2 = markers.slice(-2);
-    const diff = Math.abs(last2[1].sample - last2[0].sample);
-    const diffMs = diff / SAMPLE_RATE * 1000;
+    // Pas de graduation 1, 2 ou 5 × 10^n supérieur ou égal à raw
+    function niceStep(raw) {
+        const p = Math.pow(10, Math.floor(Math.log10(raw)));
+        const r = raw / p;
+        return p * (r <= 1 ? 1 : r <= 2 ? 2 : r <= 5 ? 5 : 10);
+    }
     
-    log(`Distance between last 2 markers: ${diffMs.toFixed(3)}ms (${diff} samples)`, 'success');
-}
-
-function log(msg, type = '') {
-    const logArea = document.getElementById('logArea');
-    const time = new Date().toISOString().substr(11, 8);
-    const cls = type ? ` class="${type}"` : '';
-    logArea.innerHTML += `<div${cls}>[${time}] ${msg}</div>`;
-    logArea.scrollTop = logArea.scrollHeight;
-    console.log(msg);
-}
-</script>
+    function prepCanvas(id) {
+        const c = document.getElementById(id);
+        c.width = Math.max(300, c.clientWidth || 1000);
+        const ctx = c.getContext('2d');
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, c.width, c.height);
+        ctx.font = '11px monospace';
+        return { c, ctx, w: c.width, h: c.height };
+    }
+    
+    // Écart de chaque synchro au rythme nominal depuis la première ; la pente
+    // de la droite mesurée est l'écart d'horloge
+    function drawDrift() {
+        const { ctx, w, h } = prepCanvas('driftCanvas');
+        const r = result;
+        if (!r || !r.points || r.points.length < 2) return;
+        const spm = track.rate / 1000, Tn = r.layout.period * spm;
+        const [n0, p0] = r.points[0];
+        const pts = r.points.map(([n, p]) => [n, (p - p0 - (n - n0) * Tn) / spm]);
+        let lo = Math.min(-1, ...pts.map(q => q[1])), hi = Math.max(1, ...pts.map(q => q[1]));
+        if (r.fit) {
+            for (const n of [0, r.syncsExpected - 1]) {
+                const d = (r.fit.a + r.fit.b * n - p0 - (n - n0) * Tn) / spm;
+                lo = Math.min(lo, d); hi = Math.max(hi, d);
+            }
+        }
+        const pad = (hi - lo) * 0.1; lo -= pad; hi += pad;
+        const X = n => 40 + n / Math.max(1, r.syncsExpected - 1) * (w - 50);
+        const Y = v => h - 20 - (v - lo) / (hi - lo) * (h - 30);
+        
+        // Grille
+        ctx.strokeStyle = '#222'; ctx.fillStyle = '#666';
+        const step = niceStep((hi - lo) / 5);
+        for (let v = Math.ceil(lo / step) * step; v <= hi; v += step) {
+            ctx.beginPath(); ctx.moveTo(40, Y(v)); ctx.lineTo(w, Y(v)); ctx.stroke();
+            ctx.fillText(+v.toFixed(3) + '', 2, Y(v) + 4);
+        }
+        ctx.strokeStyle = '#555';
+        ctx.beginPath(); ctx.moveTo(40, Y(0)); ctx.lineTo(w, Y(0)); ctx.stroke();
+        
+        // Droite mesurée
+        if (r.fit) {
+            ctx.strokeStyle = '#00ffff';
+            ctx.beginPath();
+            for (const n of [0, r.syncsExpected - 1]) {
+                const d = (r.fit.a + r.fit.b * n - p0 - (n - n0) * Tn) / spm;
+                n === 0 ? ctx.moveTo(X(n), Y(d)) : ctx.lineTo(X(n), Y(d));
+            }
+            ctx.stroke();
+        }
+        // Synchros
+        ctx.fillStyle = '#00ff00';
+        for (const [n, d] of pts) ctx.fillRect(X(n) - 1, Y(d) - 1, 3, 3);
+        ctx.fillStyle = '#666';
+        ctx.fillText('0', X(0), h - 5);
+        ctx.fillText(String(r.syncsExpected - 1), X(r.syncsExpected - 1) - 24, h - 5);
+    }
+    
+    // Fenêtre visible du tracé de fréquence (indices)
+    function view() {
+        const total = track.len;
+        const zoom = Math.pow(10, document.getElementById('zoomRange').value / 50);
+        const span = Math.max(50, Math.floor(total / zoom));
+        const first = Math.floor(document.getElementById('offsetRange').value / 1000 * (total - span));
+        document.getElementById('zoomLabel').textContent = zoom.toFixed(1) + 'x';
+        return { first, span };
+    }
+    
+    function drawFreq() {
+        const { ctx, w, h } = prepCanvas('freqCanvas');
+        if (!track) return;
+        const { first, span } = view();
+        const Y = f => h - 15 - (f - 1000) / 1500 * (h - 20);
+        const X = i => (i - first) / span * w;
+        
+        ctx.strokeStyle = '#222'; ctx.fillStyle = '#555';
+        for (const f of [1100, 1200, 1300, 1500, 1900, 2300]) {
+            ctx.beginPath(); ctx.moveTo(0, Y(f)); ctx.lineTo(w, Y(f)); ctx.stroke();
+            ctx.fillText(f + ' Hz', 3, Y(f) - 2);
+        }
+        
+        // Repères : fins de synchro (si lisibles), bit de start du VIS, début d'image
+        const vline = (i, color) => {
+            if (i < first || i > first + span) return;
+            ctx.strokeStyle = color; ctx.beginPath(); ctx.moveTo(X(i), 0); ctx.lineTo(X(i), h); ctx.stroke();
+        };
+        if (result && result.points) {
+            const inView = result.points.filter(([, p]) => p >= first && p <= first + span);
+            if (inView.length <= 40) for (const [, p] of inView) vline(p, '#553300');
+        }
+        if (result && result.vis) vline(result.vis.edge, '#ff00ff');
+        if (result && result.start !== undefined) vline(result.start, '#ffff00');
+        
+        // Fréquence : enveloppe min / max par colonne
+        ctx.strokeStyle = '#00ffff';
+        ctx.beginPath();
+        for (let x = 0; x < w; x++) {
+            const a = Math.floor(first + x * span / w) - track.base;
+            const b = Math.max(a + 1, Math.floor(first + (x + 1) * span / w) - track.base);
+            let lo = Infinity, hi = -Infinity;
+            for (let i = a; i < b && i < track.n; i++) { const f = track.f[i]; if (f < lo) lo = f; if (f > hi) hi = f; }
+            if (lo === Infinity) break;
+            ctx.moveTo(x + 0.5, Y(hi)); ctx.lineTo(x + 0.5, Y(lo) + 1);
+        }
+        ctx.stroke();
+        
+        // Mesures A et B
+        for (const [mk, color, name] of [[markA, '#ffffff', 'A'], [markB, '#ff8800', 'B']]) {
+            if (!mk) continue;
+            vline(mk.i, color);
+            ctx.fillStyle = color; ctx.fillText(name, X(mk.i) + 3, 12);
+        }
+        
+        // Axe des temps
+        ctx.fillStyle = '#666';
+        const t0 = ms(first), t1 = ms(first + span);
+        const st = niceStep((t1 - t0) / Math.max(2, Math.floor(w / 110)));
+        for (let t = Math.ceil(t0 / st) * st; t < t1; t += st) ctx.fillText(+t.toFixed(3) + ' ms', (t - t0) / (t1 - t0) * w + 2, h - 3);
+    }
+    
+    // Clic : repère A, puis B, puis A…
+    function measureAt(clientX) {
+        if (!track) return;
+        const c = document.getElementById('freqCanvas');
+        const rect = c.getBoundingClientRect();
+        const { first, span } = view();
+        const i = Math.round(first + (clientX - rect.left) / rect.width * span);
+        const f = track.mean(i - 0.25 * track.rate / 1000, i + 0.25 * track.rate / 1000);
+        if (!markA || markB) { markA = { i, f }; markB = null; } else markB = { i, f };
+        let txt = `${T.meas_a} ${fmt(ms(markA.i), 3)} ms, ${fmt(markA.f, 0)} Hz`;
+        if (markB) txt += ` — ${T.meas_b} ${fmt(ms(markB.i), 3)} ms, ${fmt(markB.f, 0)} Hz — ${T.meas_d} ${fmt(ms(markB.i - markA.i), 3)} ms`;
+        document.getElementById('measure').textContent = txt;
+        drawFreq();
+    }
+    
+    // ==========================================================================
+    // ÉVÉNEMENTS
+    // ==========================================================================
+    
+    document.getElementById('fileInput').addEventListener('change', e => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = ev => {
+            try { loadBuffer(ev.target.result); }
+            catch (err) {
+                const s = document.getElementById('status');
+                s.textContent = err.message; s.style.display = 'block';
+            }
+        };
+        reader.readAsArrayBuffer(file);
+    });
+    document.getElementById('modeSelect').addEventListener('change', analyze);
+    document.getElementById('zoomRange').addEventListener('input', drawFreq);
+    document.getElementById('offsetRange').addEventListener('input', drawFreq);
+    document.getElementById('freqCanvas').addEventListener('click', e => measureAt(e.clientX));
+    window.addEventListener('resize', () => { if (track) { drawDrift(); drawFreq(); } });
+    </script>
 </body>
 </html>

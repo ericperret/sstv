@@ -11,7 +11,7 @@
 
 🇫🇷 [Version française : LISEZMOI.md](LISEZMOI.md)
 
-Slow Scan Television (SSTV) in the browser: encode an image into an audio file, decode a file or live sound, diagnose a recording. Three standalone HTML files, no library, no installation. User interfaces in French (diagnostic tool in English).
+Slow Scan Television (SSTV) in the browser: encode an image into an audio file, decode a file or live sound, diagnose a recording. Three standalone HTML files, no library, no installation. User interfaces in French (diagnostic tool in French or English, after the browser).
 
 ▶️ **[Tools home page](https://ericperret.github.io/sstv/index2.html)**
 
@@ -53,10 +53,10 @@ Slow Scan Television (SSTV) in the browser: encode an image into an audio file, 
 
 | Feature | Description |
 |---|---|
-| Input | WAV file |
-| Searches | VIS code, sync pulses, line duration measurement |
-| Plot | Instantaneous frequency, measurement on click |
-| Results | Detected markers, timing analysis, log |
+| Input | Any WAV file (8 / 16 / 24 / 32-bit or float, mono or stereo, any sample rate) |
+| Measurements | Standard VIS, all 11 modes, sync pulses measured line by line: line period, clock error (ppm), cumulative drift (ms and pixels), sync duration and frequency |
+| Plots | Sync deviation from nominal timing (a clock error shows as a slope); instantaneous frequency with zoom and A / B measurement on click |
+| Language | French or English, after the browser |
 
 ---
 
@@ -79,7 +79,8 @@ SSTV is used by radio amateurs to send images over HF / VHF. These tools let you
 | 2026-10-17 | Decoder 1.4: no log displayed; microphone tab simplified: Robot36 only, start on regular sync pulses (VIS optional), touch-friendly audio processing toggle usable during capture, level meter -90 to 0 dBFS, capture recording below the image |
 | 2026-10-17 | Decoder 1.5: microphone reception starts on START without waiting for VIS or sync, runs continuously until STOP (images follow one another), locks on the first sync found; a Robot36 VIS realigns the image to the top |
 | 2026-10-17 | Decoder 1.6: microphone with echo cancellation and noise suppression off, automatic gain (preamp) on with a button to turn it off; PNG and WAV downloads fixed on Chrome Android |
-| 2026-10-18 | Approved: transmitter 4.1, decoder 1.6. In progress in [dev/](https://ericperret.github.io/sstv/dev/index2.html): transmitter 4.2 (Robot72 fixed, PD90 / PD160 / PD240), decoder 1.7 (all modes with sync tracking, microphone family selector, 5-minute buffer re-decoded by tapping the image), diagnostic 2.0 (standard VIS, sync pulses measured line by line, clock error and cumulative drift, sync deviation plot, French or English after the browser) |
+| 2026-10-18 | Approved: transmitter 4.1, decoder 1.6. In progress in [dev/](https://ericperret.github.io/sstv/dev/index2.html): transmitter 4.2 (Robot72 fixed, PD90 / PD160 / PD240), decoder 1.7 (all modes with sync tracking, microphone family selector, 5-minute buffer re-decoded by tapping the image) |
+| 2026-10-18 | Approved: diagnostic 2.0 |
 
 ## License
 

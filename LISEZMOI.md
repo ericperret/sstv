@@ -11,7 +11,7 @@
 
 🇬🇧 [English version: README.md](README.md)
 
-Télévision à balayage lent (SSTV) dans le navigateur : émission d'une image en fichier audio, décodage d'un fichier ou du son en direct, diagnostic d'un enregistrement. Trois fichiers HTML autonomes, aucune librairie, aucune installation. Interfaces en français (diagnostic en anglais).
+Télévision à balayage lent (SSTV) dans le navigateur : émission d'une image en fichier audio, décodage d'un fichier ou du son en direct, diagnostic d'un enregistrement. Trois fichiers HTML autonomes, aucune librairie, aucune installation. Interfaces en français (diagnostic en français ou en anglais, selon le navigateur).
 
 ▶️ **[Page d'accueil des outils](https://ericperret.github.io/sstv/index2.html)**
 
@@ -53,10 +53,10 @@ Télévision à balayage lent (SSTV) dans le navigateur : émission d'une image 
 
 | Fonction | Description |
 |---|---|
-| Entrée | Fichier WAV |
-| Recherches | Code VIS, impulsions de synchronisation, mesure de la durée de ligne |
-| Tracé | Fréquence instantanée, mesure au clic |
-| Résultats | Marqueurs détectés, analyse des temps, journal |
+| Entrée | Tout fichier WAV (8 / 16 / 24 / 32 bits ou flottant, mono ou stéréo, toute fréquence d'échantillonnage) |
+| Mesures | VIS normalisé, les 11 modes, synchros mesurées ligne par ligne : période de ligne, écart d'horloge (ppm), dérive cumulée (ms et pixels), durée et fréquence de synchro |
+| Tracés | Écart des synchros au rythme nominal (une horloge fausse donne une pente) ; fréquence instantanée avec zoom et mesure A / B au clic |
+| Langue | Français ou anglais, selon le navigateur |
 
 ---
 
@@ -79,7 +79,8 @@ La SSTV sert aux radioamateurs pour transmettre des images en HF / VHF. Ces outi
 | 2026-10-17 | Décodeur 1.4 : aucun journal affiché ; onglet micro épuré : Robot36 seul, démarrage sur les synchros (VIS facultatif), bouton tactile des traitements audio utilisable pendant la capture, jauge -90 à 0 dBFS, enregistrement de la capture sous l'image |
 | 2026-10-17 | Décodeur 1.5 : réception micro lancée au clic sur START sans attendre VIS ni synchro, en continu jusqu'à STOP (les images s'enchaînent), accrochage sur la première synchro trouvée ; un VIS Robot36 recale l'image en haut |
 | 2026-10-17 | Décodeur 1.6 : micro avec annulation d'écho et réduction de bruit coupées, préampli (gain automatique) actif avec un bouton pour le couper ; téléchargement PNG et WAV corrigé sur Chrome Android |
-| 2026-10-18 | Approuvé : émetteur 4.1, décodeur 1.6. En cours dans [dev/](https://ericperret.github.io/sstv/dev/index2.html) : émetteur 4.2 (Robot72 corrigé, PD90 / PD160 / PD240), décodeur 1.7 (tous les modes avec suivi de synchro, choix de la famille au micro, tampon de 5 minutes redécodé en touchant l'image), diagnostic 2.0 (VIS normalisé, synchros mesurées ligne par ligne, écart d'horloge et dérive cumulée, tracé des écarts de synchro, français ou anglais selon le navigateur) |
+| 2026-10-18 | Approuvé : émetteur 4.1, décodeur 1.6. En cours dans [dev/](https://ericperret.github.io/sstv/dev/index2.html) : émetteur 4.2 (Robot72 corrigé, PD90 / PD160 / PD240), décodeur 1.7 (tous les modes avec suivi de synchro, choix de la famille au micro, tampon de 5 minutes redécodé en touchant l'image) |
+| 2026-10-18 | Approuvé : diagnostic 2.0 |
 
 ## Licence
 
