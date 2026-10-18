@@ -1,0 +1,953 @@
+<!DOCTYPE html>
+<!--
+================================================================================
+  Nom        : sstv_tx_multimode_v4.html
+  Objet      : émetteur SSTV : image encodée en fichier WAV, modes Robot, Martin,
+               Scottie, PD, code VIS, mire de calibration
+  Auteur     : Eric PERRET
+  Version    : 4.2
+  Date       : 2026-10-18
+  Plateforme : HTML / CSS / JavaScript, fichier unique, aucune librairie
+  Sortie     : WAV PCM 16 bits mono 44 100 Hz, en-tête RIFF canonique 44 octets
+  Historique :
+    4.0 (2026-01-17) version initiale multi-mode
+    4.1 (2026-10-17) VIS conforme (bit de start, 7 bits, parité paire) ;
+                     temps calculé en absolu, arrondi à l'échantillon sans
+                     cumul d'erreur (ligne Robot36 = 150,000 ms) ; un pixel =
+                     une fréquence, sans interpolation parasite ; Robot36 :
+                     séparateur 1500 / 2300 Hz, palier 1900 Hz, chrominance
+                     moyennée sur le couple de lignes ; couleur BT.601 échelle
+                     studio (Barber N7CXI) ; suppression du filtre passe-bas,
+                     du lissage de fin de ligne et du choix de fréquence
+                     d'échantillonnage
+    4.2 (2026-10-18) Robot72 conforme (Y, R-Y et B-Y sur chaque ligne, ligne
+                     de 300 ms) ; ajout PD90, PD160, PD240 ; durée estimée
+                     calculée pour chaque structure de ligne
+================================================================================
+-->
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Émetteur SSTV Multi-Mode V4</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #1a1a2e;
+            color: #eee;
+        }
+        .container {
+            background-color: #16213e;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 20px rgba(0,0,0,0.3);
+        }
+        h1 {
+            color: #00d9ff;
+            text-align: center;
+            margin-bottom: 5px;
+        }
+        .subtitle {
+            text-align: center;
+            color: #888;
+            margin-bottom: 20px;
+        }
+        .control-group {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #0f3460;
+            border-radius: 8px;
+            background-color: #1a1a2e;
+        }
+        .control-group h3 {
+            color: #00d9ff;
+            margin-top: 0;
+            border-bottom: 1px solid #0f3460;
+            padding-bottom: 10px;
+        }
+        label {
+            display: inline-block;
+            width: 180px;
+            font-weight: bold;
+            color: #ccc;
+        }
+        input[type="file"], select, button {
+            margin: 5px;
+            padding: 8px 12px;
+            border-radius: 4px;
+            border: 1px solid #0f3460;
+            background-color: #16213e;
+            color: #eee;
+        }
+        select {
+            min-width: 200px;
+        }
+        button {
+            background-color: #00d9ff;
+            color: #1a1a2e;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+            padding: 12px 24px;
+            border: none;
+            transition: all 0.3s;
+        }
+        button:hover {
+            background-color: #00b8d9;
+            transform: translateY(-2px);
+        }
+        button:disabled {
+            background-color: #444;
+            color: #888;
+            cursor: not-allowed;
+            transform: none;
+        }
+        #canvas {
+            border: 2px solid #0f3460;
+            display: block;
+            margin: 20px auto;
+            border-radius: 4px;
+        }
+        .progress-bar {
+            width: 100%;
+            height: 24px;
+            background-color: #0f3460;
+            border-radius: 12px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #00d9ff, #00ff88);
+            width: 0%;
+            transition: width 0.3s;
+            border-radius: 12px;
+        }
+        .info {
+            background-color: #0f3460;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 10px 0;
+            font-size: 14px;
+            border-left: 4px solid #00d9ff;
+        }
+        .error {
+            background-color: #3d1a1a;
+            color: #ff6b6b;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 10px 0;
+            border-left: 4px solid #ff6b6b;
+        }
+        .mode-info {
+            font-size: 12px;
+            color: #888;
+            margin-top: 5px;
+        }
+        .option-row {
+            margin: 10px 0;
+            display: flex;
+            align-items: center;
+        }
+        .option-row label {
+            width: 180px;
+        }
+        input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            margin-right: 10px;
+        }
+        .checkbox-label {
+            width: auto;
+            color: #ccc;
+        }
+        .advanced-toggle {
+            color: #00d9ff;
+            cursor: pointer;
+            font-size: 14px;
+            margin-top: 10px;
+        }
+        .advanced-options {
+            display: none;
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px dashed #0f3460;
+        }
+        .advanced-options.show {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📡 Émetteur SSTV Multi-Mode</h1>
+        <p class="subtitle">Version 4.2 — Robot, Martin, Scottie, PD</p>
+        
+        <div class="control-group">
+            <h3>1. Charger une image</h3>
+            <input type="file" id="fileInput" accept="image/*">
+            <div id="imageInfo" class="info" style="display:none;"></div>
+        </div>
+        
+        <canvas id="canvas" width="320" height="256" style="display:none;"></canvas>
+        
+        <div class="control-group">
+            <h3>2. Mode SSTV</h3>
+            <div class="option-row">
+                <label>Mode:</label>
+                <select id="sstvMode">
+                    <optgroup label="Robot (320×240)">
+                        <option value="robot36">Robot36 Color (~36s)</option>
+                        <option value="robot72">Robot72 Color (~72s)</option>
+                        <option value="robot36bw">Robot36 N&B (~18s)</option>
+                    </optgroup>
+                    <optgroup label="Martin (320×256)">
+                        <option value="martinM1">Martin M1 (~114s)</option>
+                        <option value="martinM2">Martin M2 (~58s)</option>
+                    </optgroup>
+                    <optgroup label="Scottie (320×256)">
+                        <option value="scottieS1">Scottie S1 (~110s)</option>
+                        <option value="scottieS2">Scottie S2 (~71s)</option>
+                    </optgroup>
+                    <optgroup label="PD">
+                        <option value="pd90">PD90 320×256 (~90s)</option>
+                        <option value="pd120">PD120 640×496 (~126s)</option>
+                        <option value="pd160">PD160 512×400 (~161s)</option>
+                        <option value="pd180">PD180 640×496 (~187s)</option>
+                        <option value="pd240">PD240 640×496 (~248s)</option>
+                    </optgroup>
+                </select>
+            </div>
+            <div id="modeDescription" class="mode-info"></div>
+            
+            <span class="advanced-toggle" onclick="toggleAdvanced()">▶ Options avancées</span>
+            <div id="advancedOptions" class="advanced-options">
+                <div class="option-row">
+                    <input type="checkbox" id="includeVIS" checked>
+                    <label class="checkbox-label">Inclure le code VIS (auto-détection)</label>
+                </div>
+                <div class="option-row">
+                    <input type="checkbox" id="includeCalibration">
+                    <label class="checkbox-label">Mire de calibration (1s de 1900Hz)</label>
+                </div>
+            </div>
+        </div>
+        
+        <div class="control-group">
+            <h3>3. Encoder et télécharger</h3>
+            <button id="encodeBtn" disabled>🎵 Encoder en SSTV</button>
+            <div class="progress-bar" id="progressBar" style="display:none;">
+                <div class="progress-fill" id="progressFill"></div>
+            </div>
+            <div id="status" class="info" style="display:none;"></div>
+        </div>
+        
+        <div id="error" class="error" style="display:none;"></div>
+    </div>
+
+    <script>
+    // ==========================================================================
+    // DÉFINITIONS DES MODES SSTV
+    // ==========================================================================
+    
+    const SSTV_MODES = {
+        // Robot modes
+        robot36: {
+            name: "Robot36 Color",
+            visCode: 0x08,
+            width: 320,
+            height: 240,
+            colorMode: "yuv",
+            scanMs: 88,          // Luminance scan time
+            chromaMs: 44,        // Chrominance scan time (half rate)
+            syncMs: 9,
+            porchMs: 3,
+            separatorMs: 4.5,
+            chromaPorchMs: 1.5,
+            syncFreq: 1200,
+            porchFreq: 1500,
+            blackFreq: 1500,
+            whiteFreq: 2300,
+            separatorEvenFreq: 1500,  // ligne paire : R-Y
+            separatorOddFreq: 2300,   // ligne impaire : B-Y
+            chromaPorchFreq: 1900,
+            lineSequence: "yuv_interleaved"  // Y puis R-Y / B-Y en alternance
+        },
+        robot72: {
+            name: "Robot72 Color",
+            visCode: 0x0C,
+            width: 320,
+            height: 240,
+            colorMode: "yuv",
+            scanMs: 138,
+            chromaMs: 69,
+            syncMs: 9,
+            porchMs: 3,
+            separatorMs: 4.5,
+            chromaPorchMs: 1.5,
+            syncFreq: 1200,
+            porchFreq: 1500,
+            blackFreq: 1500,
+            whiteFreq: 2300,
+            separatorEvenFreq: 1500,  // avant R-Y
+            separatorOddFreq: 2300,   // avant B-Y
+            chromaPorchFreq: 1900,    // après le séparateur de R-Y
+            chromaPorch2Freq: 1500,   // après le séparateur de B-Y
+            lineSequence: "yuv_full"  // Y, R-Y, B-Y sur chaque ligne
+        },
+        robot36bw: {
+            name: "Robot36 B&W",
+            visCode: 0x08,
+            width: 320,
+            height: 240,
+            colorMode: "bw",
+            scanMs: 88,
+            syncMs: 9,
+            porchMs: 3,
+            syncFreq: 1200,
+            porchFreq: 1500,
+            blackFreq: 1500,
+            whiteFreq: 2300,
+            lineSequence: "y_only"
+        },
+        
+        // Martin modes (GBR sequence)
+        martinM1: {
+            name: "Martin M1",
+            visCode: 0x2C,
+            width: 320,
+            height: 256,
+            colorMode: "gbr",
+            scanMs: 146.432,     // Per color channel
+            syncMs: 4.862,
+            porchMs: 0.572,
+            separatorMs: 0.572,
+            syncFreq: 1200,
+            porchFreq: 1500,
+            blackFreq: 1500,
+            whiteFreq: 2300,
+            lineSequence: "gbr_sequential"
+        },
+        martinM2: {
+            name: "Martin M2",
+            visCode: 0x28,
+            width: 320,
+            height: 256,
+            colorMode: "gbr",
+            scanMs: 73.216,
+            syncMs: 4.862,
+            porchMs: 0.572,
+            separatorMs: 0.572,
+            syncFreq: 1200,
+            porchFreq: 1500,
+            blackFreq: 1500,
+            whiteFreq: 2300,
+            lineSequence: "gbr_sequential"
+        },
+        
+        // Scottie modes (GBR sequence, different timing)
+        scottieS1: {
+            name: "Scottie S1",
+            visCode: 0x3C,
+            width: 320,
+            height: 256,
+            colorMode: "gbr",
+            scanMs: 138.240,
+            syncMs: 9.0,
+            porchMs: 1.5,
+            separatorMs: 1.5,
+            syncFreq: 1200,
+            porchFreq: 1500,
+            blackFreq: 1500,
+            whiteFreq: 2300,
+            lineSequence: "scottie"  // Sync in middle of line
+        },
+        scottieS2: {
+            name: "Scottie S2",
+            visCode: 0x38,
+            width: 320,
+            height: 256,
+            colorMode: "gbr",
+            scanMs: 88.064,
+            syncMs: 9.0,
+            porchMs: 1.5,
+            separatorMs: 1.5,
+            syncFreq: 1200,
+            porchFreq: 1500,
+            blackFreq: 1500,
+            whiteFreq: 2300,
+            lineSequence: "scottie"
+        },
+        
+        // PD modes (high resolution) - all 4 components have SAME duration
+        pd90: {
+            name: "PD90",
+            visCode: 0x63,
+            width: 320,
+            height: 256,
+            colorMode: "yuv",
+            scanMs: 170.240,
+            syncMs: 20.0,
+            porchMs: 2.08,
+            syncFreq: 1200,
+            porchFreq: 1500,
+            blackFreq: 1500,
+            whiteFreq: 2300,
+            lineSequence: "pd"
+        },
+        pd120: {
+            name: "PD120",
+            visCode: 0x5F,
+            width: 640,
+            height: 496,
+            colorMode: "yuv",
+            scanMs: 121.6,      // Each component: Y0, R-Y, B-Y, Y1 all same
+            syncMs: 20.0,
+            porchMs: 2.08,
+            syncFreq: 1200,
+            porchFreq: 1500,
+            blackFreq: 1500,
+            whiteFreq: 2300,
+            lineSequence: "pd"
+        },
+        pd180: {
+            name: "PD180",
+            visCode: 0x60,
+            width: 640,
+            height: 496,
+            colorMode: "yuv",
+            scanMs: 183.04,     // Each component: Y0, R-Y, B-Y, Y1 all same
+            syncMs: 20.0,
+            porchMs: 2.08,
+            syncFreq: 1200,
+            porchFreq: 1500,
+            blackFreq: 1500,
+            whiteFreq: 2300,
+            lineSequence: "pd"
+        },
+        pd160: {
+            name: "PD160",
+            visCode: 0x62,
+            width: 512,
+            height: 400,
+            colorMode: "yuv",
+            scanMs: 195.584,
+            syncMs: 20.0,
+            porchMs: 2.08,
+            syncFreq: 1200,
+            porchFreq: 1500,
+            blackFreq: 1500,
+            whiteFreq: 2300,
+            lineSequence: "pd"
+        },
+        pd240: {
+            name: "PD240",
+            visCode: 0x61,
+            width: 640,
+            height: 496,
+            colorMode: "yuv",
+            scanMs: 244.48,
+            syncMs: 20.0,
+            porchMs: 2.08,
+            syncFreq: 1200,
+            porchFreq: 1500,
+            blackFreq: 1500,
+            whiteFreq: 2300,
+            lineSequence: "pd"
+        }
+    };
+    
+    // VIS constants
+    const VIS = {
+        LEADER_FREQ: 1900,
+        BREAK_FREQ: 1200,
+        ONE_FREQ: 1100,
+        ZERO_FREQ: 1300,
+        BIT_MS: 30
+    };
+    
+    // ==========================================================================
+    // VARIABLES GLOBALES
+    // ==========================================================================
+    
+    let imageData = null;
+    
+    // ==========================================================================
+    // EVENT HANDLERS
+    // ==========================================================================
+    
+    document.getElementById('fileInput').addEventListener('change', handleFileSelect);
+    document.getElementById('encodeBtn').addEventListener('click', handleEncode);
+    document.getElementById('sstvMode').addEventListener('change', updateModeInfo);
+    
+    function toggleAdvanced() {
+        const opts = document.getElementById('advancedOptions');
+        const toggle = document.querySelector('.advanced-toggle');
+        opts.classList.toggle('show');
+        toggle.textContent = opts.classList.contains('show') ? '▼ Options avancées' : '▶ Options avancées';
+    }
+    
+    function updateModeInfo() {
+        const mode = SSTV_MODES[document.getElementById('sstvMode').value];
+        const desc = document.getElementById('modeDescription');
+        const estTime = estimateTransmissionTime(mode);
+        desc.innerHTML = `Résolution: ${mode.width}×${mode.height} | Couleur: ${mode.colorMode.toUpperCase()} | Durée estimée: ~${estTime}s`;
+    }
+    
+    function estimateTransmissionTime(mode) {
+        let lineTime;
+        switch (mode.lineSequence) {
+            case 'pd':              // une synchro pour deux lignes
+                lineTime = (mode.syncMs + mode.porchMs + mode.scanMs * 4) / 2;
+                break;
+            case 'gbr_sequential':
+                lineTime = mode.syncMs + mode.porchMs + mode.scanMs * 3 + mode.separatorMs * 3;
+                break;
+            case 'scottie':
+                lineTime = mode.syncMs + mode.porchMs + mode.scanMs * 3 + mode.separatorMs * 2;
+                break;
+            case 'yuv_full':
+                lineTime = mode.syncMs + mode.porchMs + mode.scanMs +
+                           2 * (mode.separatorMs + mode.chromaPorchMs + mode.chromaMs);
+                break;
+            case 'yuv_interleaved':
+                lineTime = mode.syncMs + mode.porchMs + mode.scanMs +
+                           mode.separatorMs + mode.chromaPorchMs + mode.chromaMs;
+                break;
+            default:
+                lineTime = mode.syncMs + mode.porchMs + mode.scanMs;
+        }
+        return Math.round(lineTime * mode.height / 1000);
+    }
+    
+    // ==========================================================================
+    // IMAGE HANDLING
+    // ==========================================================================
+    
+    function handleFileSelect(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+        
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            const img = new Image();
+            img.onload = function() {
+                normalizeImage(img);
+                document.getElementById('encodeBtn').disabled = false;
+                updateModeInfo();
+            };
+            img.src = e.target.result;
+        };
+        reader.readAsDataURL(file);
+    }
+    
+    function normalizeImage(img) {
+        const mode = SSTV_MODES[document.getElementById('sstvMode').value];
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        canvas.width = mode.width;
+        canvas.height = mode.height;
+        
+        // Calculate scaling to maintain aspect ratio
+        const scale = Math.min(mode.width / img.width, mode.height / img.height);
+        const w = img.width * scale;
+        const h = img.height * scale;
+        const x = (mode.width - w) / 2;
+        const y = (mode.height - h) / 2;
+        
+        // Black background
+        ctx.fillStyle = 'black';
+        ctx.fillRect(0, 0, mode.width, mode.height);
+        
+        // Draw centered image
+        ctx.drawImage(img, x, y, w, h);
+        
+        imageData = ctx.getImageData(0, 0, mode.width, mode.height);
+        
+        canvas.style.display = 'block';
+        
+        const info = document.getElementById('imageInfo');
+        info.style.display = 'block';
+        info.innerHTML = `Image chargée: ${img.width}×${img.height} → ${mode.width}×${mode.height}`;
+    }
+    
+    // ==========================================================================
+    // CONVERSION COULEUR
+    // ==========================================================================
+    
+    // Y, R-Y (V), B-Y (U) selon BT.601 échelle studio (Barber N7CXI, Dayton 2000)
+    function rgbToYUV(imageData) {
+        const width = imageData.width;
+        const height = imageData.height;
+        const pixels = imageData.data;
+        const clamp = v => Math.max(0, Math.min(255, Math.round(v)));
+        
+        const Y = [];
+        const U = [];
+        const V = [];
+        
+        for (let y = 0; y < height; y++) {
+            Y[y] = new Uint8Array(width);
+            U[y] = new Uint8Array(width);
+            V[y] = new Uint8Array(width);
+            
+            for (let x = 0; x < width; x++) {
+                const idx = (y * width + x) * 4;
+                const r = pixels[idx];
+                const g = pixels[idx + 1];
+                const b = pixels[idx + 2];
+                
+                Y[y][x] = clamp(16 + (65.738 * r + 129.057 * g + 25.064 * b) / 256);
+                V[y][x] = clamp(128 + (112.439 * r - 94.154 * g - 18.285 * b) / 256);
+                U[y][x] = clamp(128 + (-37.945 * r - 74.494 * g + 112.439 * b) / 256);
+            }
+        }
+        
+        return { Y, U, V, width, height };
+    }
+    
+    function rgbToGBR(imageData) {
+        const width = imageData.width;
+        const height = imageData.height;
+        const pixels = imageData.data;
+        
+        const G = [];
+        const B = [];
+        const R = [];
+        
+        for (let y = 0; y < height; y++) {
+            G[y] = new Uint8Array(width);
+            B[y] = new Uint8Array(width);
+            R[y] = new Uint8Array(width);
+            
+            for (let x = 0; x < width; x++) {
+                const idx = (y * width + x) * 4;
+                R[y][x] = pixels[idx];
+                G[y][x] = pixels[idx + 1];
+                B[y][x] = pixels[idx + 2];
+            }
+        }
+        
+        return { G, B, R, width, height };
+    }
+    
+    // Moyenne de deux lignes (chrominance partagée par un couple de lignes)
+    function averageRows(a, b) {
+        const out = new Uint8Array(a.length);
+        for (let x = 0; x < a.length; x++) out[x] = Math.round((a[x] + b[x]) / 2);
+        return out;
+    }
+    
+    // ==========================================================================
+    // GÉNÉRATION DU SIGNAL
+    // Le temps théorique de chaque segment est cumulé en millisecondes (double)
+    // et seule la fin de chaque segment est arrondie à l'échantillon : aucune
+    // erreur ne s'accumule d'une ligne à l'autre. Phase continue.
+    // ==========================================================================
+    
+    const SAMPLE_RATE = 44100;
+    const AMPLITUDE = 0.8;
+    
+    function SignalWriter(sampleRate) {
+        this.fs = sampleRate;
+        this.buf = new Float32Array(sampleRate * 10);
+        this.n = 0;       // prochain échantillon à écrire
+        this.t = 0;       // fin théorique du dernier segment (ms)
+        this.phase = 0;
+    }
+    
+    SignalWriter.prototype.reserve = function (end) {
+        if (end <= this.buf.length) return;
+        let size = this.buf.length * 2;
+        while (size < end) size *= 2;
+        const nb = new Float32Array(size);
+        nb.set(this.buf.subarray(0, this.n));
+        this.buf = nb;
+    };
+    
+    // Ton fixe de durée ms
+    SignalWriter.prototype.tone = function (freq, ms) {
+        const end = Math.round((this.t + ms) * this.fs / 1000);
+        this.reserve(end);
+        const inc = 2 * Math.PI * freq / this.fs;
+        for (; this.n < end; this.n++) {
+            this.buf[this.n] = AMPLITUDE * Math.sin(this.phase);
+            this.phase += inc;
+        }
+        this.phase %= 2 * Math.PI;
+        this.t += ms;
+    };
+    
+    // Balayage : values (0-255) réparties uniformément sur ms
+    SignalWriter.prototype.scan = function (values, ms, blackFreq, whiteFreq) {
+        const t0 = this.t;
+        const end = Math.round((t0 + ms) * this.fs / 1000);
+        this.reserve(end);
+        const count = values.length;
+        const k = (whiteFreq - blackFreq) / 255;
+        const pixelsPerMs = count / ms;
+        for (; this.n < end; this.n++) {
+            let p = Math.floor((this.n * 1000 / this.fs - t0) * pixelsPerMs);
+            if (p < 0) p = 0; else if (p >= count) p = count - 1;
+            const freq = blackFreq + values[p] * k;
+            this.buf[this.n] = AMPLITUDE * Math.sin(this.phase);
+            this.phase += 2 * Math.PI * freq / this.fs;
+        }
+        this.phase %= 2 * Math.PI;
+        this.t += ms;
+    };
+    
+    SignalWriter.prototype.samples = function () {
+        return this.buf.subarray(0, this.n);
+    };
+    
+    // ==========================================================================
+    // CODE VIS : amorce 300 ms, coupure 10 ms, amorce 300 ms, start 30 ms,
+    // 7 bits poids faible en premier (1 = 1100 Hz, 0 = 1300 Hz), parité paire,
+    // stop 30 ms
+    // ==========================================================================
+    
+    function writeVIS(w, visCode) {
+        w.tone(VIS.LEADER_FREQ, 300);
+        w.tone(VIS.BREAK_FREQ, 10);
+        w.tone(VIS.LEADER_FREQ, 300);
+        w.tone(VIS.BREAK_FREQ, VIS.BIT_MS);
+        let ones = 0;
+        for (let bit = 0; bit < 7; bit++) {
+            const one = (visCode >> bit) & 1;
+            ones += one;
+            w.tone(one ? VIS.ONE_FREQ : VIS.ZERO_FREQ, VIS.BIT_MS);
+        }
+        w.tone((ones & 1) ? VIS.ONE_FREQ : VIS.ZERO_FREQ, VIS.BIT_MS);
+        w.tone(VIS.BREAK_FREQ, VIS.BIT_MS);
+    }
+    
+    // ==========================================================================
+    // ENCODEURS PAR MODE
+    // ==========================================================================
+    
+    function writeRobotLines(w, colorData, mode, updateProgress) {
+        const isColor = mode.colorMode === 'yuv' && mode.chromaMs;
+        
+        for (let lineNum = 0; lineNum < colorData.height; lineNum++) {
+            w.tone(mode.syncFreq, mode.syncMs);
+            w.tone(mode.porchFreq, mode.porchMs);
+            w.scan(colorData.Y[lineNum], mode.scanMs, mode.blackFreq, mode.whiteFreq);
+            
+            if (isColor) {
+                // Ligne paire : R-Y ; ligne impaire : B-Y ; moyenne du couple
+                const isEvenLine = (lineNum % 2 === 0);
+                const first = lineNum - (lineNum % 2);
+                const second = Math.min(first + 1, colorData.height - 1);
+                const plane = isEvenLine ? colorData.V : colorData.U;
+                const chroma = averageRows(plane[first], plane[second]);
+                
+                w.tone(isEvenLine ? mode.separatorEvenFreq : mode.separatorOddFreq, mode.separatorMs);
+                w.tone(mode.chromaPorchFreq, mode.chromaPorchMs);
+                w.scan(chroma, mode.chromaMs, mode.blackFreq, mode.whiteFreq);
+            }
+            
+            updateProgress((lineNum + 1) / colorData.height * 100);
+        }
+    }
+    
+    // Robot72 : synchro, palier, Y, séparateur 1500 Hz, palier 1900 Hz, R-Y,
+    // séparateur 2300 Hz, palier 1500 Hz, B-Y
+    function writeRobotFullLines(w, colorData, mode, updateProgress) {
+        for (let lineNum = 0; lineNum < colorData.height; lineNum++) {
+            w.tone(mode.syncFreq, mode.syncMs);
+            w.tone(mode.porchFreq, mode.porchMs);
+            w.scan(colorData.Y[lineNum], mode.scanMs, mode.blackFreq, mode.whiteFreq);
+            w.tone(mode.separatorEvenFreq, mode.separatorMs);
+            w.tone(mode.chromaPorchFreq, mode.chromaPorchMs);
+            w.scan(colorData.V[lineNum], mode.chromaMs, mode.blackFreq, mode.whiteFreq);
+            w.tone(mode.separatorOddFreq, mode.separatorMs);
+            w.tone(mode.chromaPorch2Freq, mode.chromaPorchMs);
+            w.scan(colorData.U[lineNum], mode.chromaMs, mode.blackFreq, mode.whiteFreq);
+            updateProgress((lineNum + 1) / colorData.height * 100);
+        }
+    }
+    
+    // Martin : synchro, palier, G, séparateur, B, séparateur, R, séparateur
+    function writeMartinLines(w, colorData, mode, updateProgress) {
+        for (let lineNum = 0; lineNum < colorData.height; lineNum++) {
+            w.tone(mode.syncFreq, mode.syncMs);
+            w.tone(mode.porchFreq, mode.porchMs);
+            w.scan(colorData.G[lineNum], mode.scanMs, mode.blackFreq, mode.whiteFreq);
+            w.tone(mode.porchFreq, mode.separatorMs);
+            w.scan(colorData.B[lineNum], mode.scanMs, mode.blackFreq, mode.whiteFreq);
+            w.tone(mode.porchFreq, mode.separatorMs);
+            w.scan(colorData.R[lineNum], mode.scanMs, mode.blackFreq, mode.whiteFreq);
+            w.tone(mode.porchFreq, mode.separatorMs);
+            updateProgress((lineNum + 1) / colorData.height * 100);
+        }
+    }
+    
+    // Scottie : synchro initiale, puis séparateur, G, séparateur, B, synchro,
+    // palier, R
+    function writeScottieLines(w, colorData, mode, updateProgress) {
+        w.tone(mode.syncFreq, mode.syncMs);
+        for (let lineNum = 0; lineNum < colorData.height; lineNum++) {
+            w.tone(mode.porchFreq, mode.separatorMs);
+            w.scan(colorData.G[lineNum], mode.scanMs, mode.blackFreq, mode.whiteFreq);
+            w.tone(mode.porchFreq, mode.separatorMs);
+            w.scan(colorData.B[lineNum], mode.scanMs, mode.blackFreq, mode.whiteFreq);
+            w.tone(mode.syncFreq, mode.syncMs);
+            w.tone(mode.porchFreq, mode.porchMs);
+            w.scan(colorData.R[lineNum], mode.scanMs, mode.blackFreq, mode.whiteFreq);
+            updateProgress((lineNum + 1) / colorData.height * 100);
+        }
+    }
+    
+    // PD : synchro, palier, Y0, R-Y, B-Y, Y1 (chrominance moyennée du couple)
+    function writePDLines(w, colorData, mode, updateProgress) {
+        const totalPairs = Math.floor(colorData.height / 2);
+        for (let pair = 0; pair < totalPairs; pair++) {
+            const line0 = pair * 2;
+            const line1 = line0 + 1;
+            w.tone(mode.syncFreq, mode.syncMs);
+            w.tone(mode.porchFreq, mode.porchMs);
+            w.scan(colorData.Y[line0], mode.scanMs, mode.blackFreq, mode.whiteFreq);
+            w.scan(averageRows(colorData.V[line0], colorData.V[line1]), mode.scanMs, mode.blackFreq, mode.whiteFreq);
+            w.scan(averageRows(colorData.U[line0], colorData.U[line1]), mode.scanMs, mode.blackFreq, mode.whiteFreq);
+            w.scan(colorData.Y[line1], mode.scanMs, mode.blackFreq, mode.whiteFreq);
+            updateProgress((pair + 1) / totalPairs * 100);
+        }
+    }
+    
+    // ==========================================================================
+    // FICHIER WAV : PCM 16 bits mono, en-tête RIFF canonique 44 octets
+    // ==========================================================================
+    
+    function createWAVBuffer(audioData, sampleRate) {
+        const length = audioData.length;
+        const arrayBuffer = new ArrayBuffer(44 + length * 2);
+        const view = new DataView(arrayBuffer);
+        
+        const writeString = (offset, string) => {
+            for (let i = 0; i < string.length; i++) {
+                view.setUint8(offset + i, string.charCodeAt(i));
+            }
+        };
+        
+        writeString(0, 'RIFF');
+        view.setUint32(4, 36 + length * 2, true);
+        writeString(8, 'WAVE');
+        writeString(12, 'fmt ');
+        view.setUint32(16, 16, true);             // taille du bloc fmt
+        view.setUint16(20, 1, true);              // PCM
+        view.setUint16(22, 1, true);              // mono
+        view.setUint32(24, sampleRate, true);
+        view.setUint32(28, sampleRate * 2, true); // octets par seconde
+        view.setUint16(32, 2, true);              // octets par échantillon
+        view.setUint16(34, 16, true);             // bits par échantillon
+        writeString(36, 'data');
+        view.setUint32(40, length * 2, true);
+        
+        let offset = 44;
+        for (let i = 0; i < length; i++) {
+            const sample = Math.max(-1, Math.min(1, audioData[i]));
+            view.setInt16(offset, Math.round(sample * 32767), true);
+            offset += 2;
+        }
+        
+        return arrayBuffer;
+    }
+    
+    // Signal complet (mire, VIS, image) → WAV
+    function buildWAV(imageData, modeName, options, updateProgress) {
+        const mode = SSTV_MODES[modeName];
+        const progress = updateProgress || (() => {});
+        const colorData = mode.colorMode === 'gbr' ? rgbToGBR(imageData) : rgbToYUV(imageData);
+        const w = new SignalWriter(SAMPLE_RATE);
+        
+        if (options.includeCalibration) w.tone(1900, 1000);
+        if (options.includeVIS) writeVIS(w, mode.visCode);
+        
+        if (mode.lineSequence === 'gbr_sequential') writeMartinLines(w, colorData, mode, progress);
+        else if (mode.lineSequence === 'scottie') writeScottieLines(w, colorData, mode, progress);
+        else if (mode.lineSequence === 'pd') writePDLines(w, colorData, mode, progress);
+        else if (mode.lineSequence === 'yuv_full') writeRobotFullLines(w, colorData, mode, progress);
+        else writeRobotLines(w, colorData, mode, progress);
+        
+        const samples = w.samples();
+        return { wav: createWAVBuffer(samples, SAMPLE_RATE), seconds: samples.length / SAMPLE_RATE };
+    }
+    
+    // ==========================================================================
+    // ENCODAGE (interface)
+    // ==========================================================================
+    
+    function handleEncode() {
+        if (!imageData) return;
+        
+        const encodeBtn = document.getElementById('encodeBtn');
+        const progressBar = document.getElementById('progressBar');
+        const progressFill = document.getElementById('progressFill');
+        const status = document.getElementById('status');
+        const errorDiv = document.getElementById('error');
+        
+        encodeBtn.disabled = true;
+        progressBar.style.display = 'block';
+        status.style.display = 'block';
+        errorDiv.style.display = 'none';
+        
+        const modeName = document.getElementById('sstvMode').value;
+        const mode = SSTV_MODES[modeName];
+        const options = {
+            includeVIS: document.getElementById('includeVIS').checked,
+            includeCalibration: document.getElementById('includeCalibration').checked
+        };
+        
+        // Remise à l'échelle de l'image pour le mode choisi
+        const canvas = document.getElementById('canvas');
+        if (canvas.width !== mode.width || canvas.height !== mode.height) {
+            const img = new Image();
+            img.src = canvas.toDataURL();
+            img.onload = () => {
+                normalizeImage(img);
+                setTimeout(() => performEncode(), 50);
+            };
+            return;
+        }
+        
+        setTimeout(() => performEncode(), 50);
+        
+        function performEncode() {
+            try {
+                status.textContent = `Encodage ${mode.name}...`;
+                const result = buildWAV(imageData, modeName, options, percent => {
+                    progressFill.style.width = percent + '%';
+                });
+                
+                const wavBlob = new Blob([result.wav], { type: 'audio/wav' });
+                const url = URL.createObjectURL(wavBlob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `sstv_${modeName}_${Date.now()}.wav`;
+                a.click();
+                URL.revokeObjectURL(url);
+                
+                const sizeKB = Math.round(wavBlob.size / 1024);
+                status.textContent = `✓ Encodage terminé ! Durée: ${result.seconds.toFixed(1)}s | Taille: ${sizeKB} KB | PCM 16 bits mono 44 100 Hz`;
+                status.style.borderLeftColor = '#00ff88';
+                
+            } catch (error) {
+                console.error(error);
+                errorDiv.style.display = 'block';
+                errorDiv.textContent = 'Erreur: ' + error.message;
+            } finally {
+                encodeBtn.disabled = false;
+            }
+        }
+    }
+    
+    // Initialize
+    updateModeInfo();
+    </script>
+</body>
+</html>

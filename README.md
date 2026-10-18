@@ -2,7 +2,7 @@
   Name     : README.md
   Purpose  : Overview of the sstv repository (SSTV transmission, reception and diagnosis)
   Author   : Eric PERRET
-  Date     : 2026-10-17
+  Date     : 2026-10-18
   Version  : 1.7
   License  : CC BY-NC 4.0
 -->
@@ -30,7 +30,7 @@ Slow Scan Television (SSTV) in the browser: encode an image into an audio file, 
 | Feature | Description |
 |---|---|
 | Image | Image loading, scaled to the chosen mode |
-| Modes | Robot36 colour and B&W, Robot72, Martin M1 / M2, Scottie S1 / S2, PD90, PD120, PD160, PD180, PD240 (duration shown) |
+| Modes | Robot36 colour and B&W, Robot72, Martin M1 / M2, Scottie S1 / S2, PD120, PD180 (duration shown) |
 | Signal | PCM 16-bit mono 44.1 kHz WAV, sample-accurate timing (Robot36 line = 150.000 ms) |
 | Header | Standard VIS code (start bit, 7 bits, even parity, stop bit), optional 1 s calibration tone at 1,900 Hz |
 | Output | Downloaded WAV file, to be played through a transmitter or a loudspeaker |
@@ -41,10 +41,9 @@ Slow Scan Television (SSTV) in the browser: encode an image into an audio file, 
 
 | Feature | Description |
 |---|---|
-| Sources | WAV file (8 / 16 / 24 / 32-bit or float, mono or stereo, any sample rate), or live audio from the microphone at its native sample rate (smartphone friendly, screen kept awake) |
-| Microphone | Family selector (Robot, Martin, Scottie, PD); reception starts on START; the last 5 minutes are kept and tapping the image decodes them again in the next sub-mode, even after STOP |
+| Sources | WAV file (8 / 16 / 24 / 32-bit or float, mono or stereo, any sample rate), or live audio from the microphone at its native sample rate and default settings (smartphone friendly, screen kept awake) |
 | Modes | Automatic detection by VIS code, or forced: Robot36 / 72, Martin M1 / M2, Scottie S1 / S2, PD90 to PD240 |
-| Synchronisation | All modes: sync tracked line by line and measured clock (no slant); automatic AFC, manual Doppler offset |
+| Synchronisation | Robot36: sync tracked line by line and measured clock (no slant); automatic AFC, manual Doppler offset |
 | Analysis | Signal analysis, image displayed as it decodes |
 | Output | PNG export of the decoded image; WAV recording of the microphone capture |
 
@@ -61,6 +60,10 @@ Slow Scan Television (SSTV) in the browser: encode an image into an audio file, 
 
 ---
 
+## Versions
+
+The tools at the root of the repository are the **approved** version. Work in progress lives in the [dev/](dev/) folder, same file names, online at ▶️ **[dev/index2.html](https://ericperret.github.io/sstv/dev/index2.html)**. A version is copied to the root only once approved; each approved version is tagged (`tx-4.1`, `rx-1.6`…).
+
 ## Amateur radio
 
 SSTV is used by radio amateurs to send images over HF / VHF. These tools let you experiment without a transmitter, through an audio cable or acoustic coupling; transmitting on amateur bands still requires a licence.
@@ -76,7 +79,7 @@ SSTV is used by radio amateurs to send images over HF / VHF. These tools let you
 | 2026-10-17 | Decoder 1.4: no log displayed; microphone tab simplified: Robot36 only, start on regular sync pulses (VIS optional), touch-friendly audio processing toggle usable during capture, level meter -90 to 0 dBFS, capture recording below the image |
 | 2026-10-17 | Decoder 1.5: microphone reception starts on START without waiting for VIS or sync, runs continuously until STOP (images follow one another), locks on the first sync found; a Robot36 VIS realigns the image to the top |
 | 2026-10-17 | Decoder 1.6: microphone with echo cancellation and noise suppression off, automatic gain (preamp) on with a button to turn it off; PNG and WAV downloads fixed on Chrome Android |
-| 2026-10-18 | Transmitter 4.2: Robot72 fixed, PD90 / PD160 / PD240 added. Decoder 1.7: one decoding engine for all modes (sync tracking, measured clock), microphone family selector, 5-minute buffer re-decoded in another sub-mode by tapping the image. All modes validated against an external decoder and PySSTV recordings |
+| 2026-10-18 | Approved: transmitter 4.1, decoder 1.6. In progress in [dev/](https://ericperret.github.io/sstv/dev/index2.html): transmitter 4.2 (Robot72 fixed, PD90 / PD160 / PD240), decoder 1.7 (all modes with sync tracking, microphone family selector, 5-minute buffer re-decoded by tapping the image) |
 
 ## License
 

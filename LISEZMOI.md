@@ -2,7 +2,7 @@
   Nom      : LISEZMOI.md
   Objet    : Présentation du dépôt sstv (émission, réception et diagnostic SSTV)
   Auteur   : Eric PERRET
-  Date     : 2026-10-17
+  Date     : 2026-10-18
   Version  : 1.7
   Licence  : CC BY-NC 4.0
 -->
@@ -30,7 +30,7 @@ Télévision à balayage lent (SSTV) dans le navigateur : émission d'une image 
 | Fonction | Description |
 |---|---|
 | Image | Chargement d'une image, mise à l'échelle du mode choisi |
-| Modes | Robot36 couleur et N&B, Robot72, Martin M1 / M2, Scottie S1 / S2, PD90, PD120, PD160, PD180, PD240 (durée affichée) |
+| Modes | Robot36 couleur et N&B, Robot72, Martin M1 / M2, Scottie S1 / S2, PD120, PD180 (durée affichée) |
 | Signal | WAV PCM 16 bits mono 44,1 kHz, temps exact à l'échantillon (ligne Robot36 = 150,000 ms) |
 | En-tête | Code VIS normalisé (bit de start, 7 bits, parité paire, bit de stop), mire de calibration 1 s à 1 900 Hz en option |
 | Sortie | Fichier WAV téléchargé, à diffuser par un émetteur ou un haut-parleur |
@@ -41,10 +41,9 @@ Télévision à balayage lent (SSTV) dans le navigateur : émission d'une image 
 
 | Fonction | Description |
 |---|---|
-| Sources | Fichier WAV (8 / 16 / 24 / 32 bits ou flottant, mono ou stéréo, toute fréquence d'échantillonnage), ou micro en direct à sa fréquence native (adapté au téléphone, écran maintenu allumé) |
-| Micro | Choix de la famille (Robot, Martin, Scottie, PD) ; réception lancée par START ; les 5 dernières minutes sont gardées, toucher l'image les redécode dans le sous-mode suivant, même après STOP |
+| Sources | Fichier WAV (8 / 16 / 24 / 32 bits ou flottant, mono ou stéréo, toute fréquence d'échantillonnage), ou micro en direct à sa fréquence et dans ses réglages par défaut (adapté au téléphone, écran maintenu allumé) |
 | Modes | Détection automatique par code VIS, ou forcé : Robot36 / 72, Martin M1 / M2, Scottie S1 / S2, PD90 à PD240 |
-| Synchronisation | Tous les modes : synchro suivie ligne par ligne et horloge mesurée (pas d'inclinaison) ; AFC automatique, décalage Doppler manuel |
+| Synchronisation | Robot36 : synchro suivie ligne par ligne et horloge mesurée (pas d'inclinaison) ; AFC automatique, décalage Doppler manuel |
 | Analyse | Analyse du signal, affichage de l'image au fil du décodage |
 | Sortie | Export PNG de l'image décodée ; enregistrement WAV de la capture micro |
 
@@ -61,6 +60,10 @@ Télévision à balayage lent (SSTV) dans le navigateur : émission d'une image 
 
 ---
 
+## Versions
+
+Les outils à la racine du dépôt sont la version **approuvée**. La version en cours est dans le dossier [dev/](dev/), mêmes noms de fichiers, en ligne sur ▶️ **[dev/index2.html](https://ericperret.github.io/sstv/dev/index2.html)**. Une version n'est copiée à la racine qu'une fois approuvée ; chaque version approuvée porte une étiquette (`tx-4.1`, `rx-1.6`…).
+
 ## Radioamateurisme
 
 La SSTV sert aux radioamateurs pour transmettre des images en HF / VHF. Ces outils permettent d'expérimenter sans émetteur, par câble audio ou couplage acoustique ; l'émission sur les bandes radioamateurs reste soumise à licence.
@@ -76,7 +79,7 @@ La SSTV sert aux radioamateurs pour transmettre des images en HF / VHF. Ces outi
 | 2026-10-17 | Décodeur 1.4 : aucun journal affiché ; onglet micro épuré : Robot36 seul, démarrage sur les synchros (VIS facultatif), bouton tactile des traitements audio utilisable pendant la capture, jauge -90 à 0 dBFS, enregistrement de la capture sous l'image |
 | 2026-10-17 | Décodeur 1.5 : réception micro lancée au clic sur START sans attendre VIS ni synchro, en continu jusqu'à STOP (les images s'enchaînent), accrochage sur la première synchro trouvée ; un VIS Robot36 recale l'image en haut |
 | 2026-10-17 | Décodeur 1.6 : micro avec annulation d'écho et réduction de bruit coupées, préampli (gain automatique) actif avec un bouton pour le couper ; téléchargement PNG et WAV corrigé sur Chrome Android |
-| 2026-10-18 | Émetteur 4.2 : Robot72 corrigé, ajout PD90 / PD160 / PD240. Décodeur 1.7 : moteur unique pour tous les modes (suivi de synchro, horloge mesurée), choix de la famille au micro, tampon de 5 minutes redécodé dans un autre sous-mode en touchant l'image. Tous les modes validés par un décodeur externe et des enregistrements PySSTV |
+| 2026-10-18 | Approuvé : émetteur 4.1, décodeur 1.6. En cours dans [dev/](https://ericperret.github.io/sstv/dev/index2.html) : émetteur 4.2 (Robot72 corrigé, PD90 / PD160 / PD240), décodeur 1.7 (tous les modes avec suivi de synchro, choix de la famille au micro, tampon de 5 minutes redécodé en touchant l'image) |
 
 ## Licence
 
