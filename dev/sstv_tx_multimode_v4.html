@@ -5,7 +5,7 @@
   Objet      : émetteur SSTV : image encodée en fichier WAV, modes Robot, Martin,
                Scottie, PD, code VIS, mire de calibration
   Auteur     : Eric PERRET
-  Version    : 4.3
+  Version    : 4.4
   Date       : 2026-10-18
   Plateforme : HTML / CSS / JavaScript, fichier unique, aucune librairie
   Sortie     : WAV PCM 16 bits mono 44 100 Hz, en-tête RIFF canonique 44 octets
@@ -25,13 +25,15 @@
                      calculée pour chaque structure de ligne
     4.3 (2026-10-18) « Robot36 N&B » retiré : aucun récepteur ne le décode
                      (il portait le VIS du Robot36 couleur)
+    4.4 (2026-10-18) interface en français ou en anglais selon la langue du
+                     navigateur ; mise en page adaptée au téléphone
 ================================================================================
 -->
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Émetteur SSTV Multi-Mode V4</title>
+    <title>SSTV v4.4</title>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -181,15 +183,28 @@
         .advanced-options.show {
             display: block;
         }
+        canvas#canvas { max-width: 100%; height: auto; }
+        @media (max-width: 600px) {
+            body { padding: 6px; }
+            .container { padding: 12px; }
+            .control-group { padding: 10px; }
+            .option-row { flex-wrap: wrap; }
+            .option-row label, label { width: auto; margin-right: 8px; }
+            .option-row { flex-wrap: nowrap; }
+            .option-row .checkbox-label { flex: 1; }
+            .option-row:has(select) { flex-wrap: wrap; }
+            select, button { max-width: 100%; }
+            button { min-height: 48px; }
+        }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>📡 Émetteur SSTV Multi-Mode</h1>
-        <p class="subtitle">Version 4.3 — Robot, Martin, Scottie, PD</p>
+        <h1 data-t="h1"></h1>
+        <p class="subtitle" data-t="subtitle"></p>
         
         <div class="control-group">
-            <h3>1. Charger une image</h3>
+            <h3 data-t="h_image"></h3>
             <input type="file" id="fileInput" accept="image/*">
             <div id="imageInfo" class="info" style="display:none;"></div>
         </div>
@@ -197,49 +212,49 @@
         <canvas id="canvas" width="320" height="256" style="display:none;"></canvas>
         
         <div class="control-group">
-            <h3>2. Mode SSTV</h3>
+            <h3 data-t="h_mode"></h3>
             <div class="option-row">
-                <label>Mode:</label>
+                <label data-t="mode_label"></label>
                 <select id="sstvMode">
                     <optgroup label="Robot (320×240)">
-                        <option value="robot36">Robot36 Color (~36s)</option>
-                        <option value="robot72">Robot72 Color (~72s)</option>
+                        <option value="robot36">Robot36 (~36 s)</option>
+                        <option value="robot72">Robot72 (~72 s)</option>
                     </optgroup>
                     <optgroup label="Martin (320×256)">
-                        <option value="martinM1">Martin M1 (~114s)</option>
-                        <option value="martinM2">Martin M2 (~58s)</option>
+                        <option value="martinM1">Martin M1 (~114 s)</option>
+                        <option value="martinM2">Martin M2 (~58 s)</option>
                     </optgroup>
                     <optgroup label="Scottie (320×256)">
-                        <option value="scottieS1">Scottie S1 (~110s)</option>
-                        <option value="scottieS2">Scottie S2 (~71s)</option>
+                        <option value="scottieS1">Scottie S1 (~110 s)</option>
+                        <option value="scottieS2">Scottie S2 (~71 s)</option>
                     </optgroup>
                     <optgroup label="PD">
-                        <option value="pd90">PD90 320×256 (~90s)</option>
-                        <option value="pd120">PD120 640×496 (~126s)</option>
-                        <option value="pd160">PD160 512×400 (~161s)</option>
-                        <option value="pd180">PD180 640×496 (~187s)</option>
-                        <option value="pd240">PD240 640×496 (~248s)</option>
+                        <option value="pd90">PD90 320×256 (~90 s)</option>
+                        <option value="pd120">PD120 640×496 (~126 s)</option>
+                        <option value="pd160">PD160 512×400 (~161 s)</option>
+                        <option value="pd180">PD180 640×496 (~187 s)</option>
+                        <option value="pd240">PD240 640×496 (~248 s)</option>
                     </optgroup>
                 </select>
             </div>
             <div id="modeDescription" class="mode-info"></div>
             
-            <span class="advanced-toggle" onclick="toggleAdvanced()">▶ Options avancées</span>
+            <span class="advanced-toggle" onclick="toggleAdvanced()">▶ <span data-t="advanced"></span></span>
             <div id="advancedOptions" class="advanced-options">
                 <div class="option-row">
                     <input type="checkbox" id="includeVIS" checked>
-                    <label class="checkbox-label">Inclure le code VIS (auto-détection)</label>
+                    <label class="checkbox-label" for="includeVIS" data-t="opt_vis"></label>
                 </div>
                 <div class="option-row">
                     <input type="checkbox" id="includeCalibration">
-                    <label class="checkbox-label">Mire de calibration (1s de 1900Hz)</label>
+                    <label class="checkbox-label" for="includeCalibration" data-t="opt_cal"></label>
                 </div>
             </div>
         </div>
         
         <div class="control-group">
-            <h3>3. Encoder et télécharger</h3>
-            <button id="encodeBtn" disabled>🎵 Encoder en SSTV</button>
+            <h3 data-t="h_encode"></h3>
+            <button id="encodeBtn" disabled data-t="encode"></button>
             <div class="progress-bar" id="progressBar" style="display:none;">
                 <div class="progress-fill" id="progressFill"></div>
             </div>
@@ -250,6 +265,47 @@
     </div>
 
     <script>
+    // ==========================================================================
+    // LANGUE : celle du navigateur, français sinon anglais
+    // ==========================================================================
+    
+    const LANG = (navigator.language || 'en').toLowerCase().startsWith('fr') ? 'fr' : 'en';
+    const TEXT = {
+        fr: {
+            title: 'Émetteur SSTV v4.4',
+            h1: '📡 Émetteur SSTV multi-mode',
+            subtitle: 'Version 4.4 — Robot, Martin, Scottie, PD',
+            h_image: '1. Charger une image', h_mode: '2. Mode SSTV', h_encode: '3. Encoder et télécharger',
+            mode_label: 'Mode :', advanced: 'Options avancées',
+            opt_vis: 'Inclure le code VIS (détection automatique)',
+            opt_cal: 'Mire de calibration (1 s à 1900 Hz)',
+            encode: '🎵 Encoder en SSTV',
+            mode_info: (w, h, c, t) => `Résolution : ${w}×${h} | Couleur : ${c} | Durée : ~${t} s`,
+            loaded: (w, h, mw, mh) => `Image chargée : ${w}×${h} → ${mw}×${mh}`,
+            encoding: name => `Encodage ${name}…`,
+            done: (d, kb) => `✓ Encodage terminé : ${d} s, ${kb} Ko, PCM 16 bits mono 44 100 Hz`,
+            error: 'Erreur : '
+        },
+        en: {
+            title: 'SSTV Transmitter v4.4',
+            h1: '📡 Multi-mode SSTV transmitter',
+            subtitle: 'Version 4.4 — Robot, Martin, Scottie, PD',
+            h_image: '1. Load an image', h_mode: '2. SSTV mode', h_encode: '3. Encode and download',
+            mode_label: 'Mode:', advanced: 'Advanced options',
+            opt_vis: 'Include the VIS code (automatic detection)',
+            opt_cal: 'Calibration tone (1 s at 1900 Hz)',
+            encode: '🎵 Encode to SSTV',
+            mode_info: (w, h, c, t) => `Resolution: ${w}×${h} | Colour: ${c} | Duration: ~${t} s`,
+            loaded: (w, h, mw, mh) => `Image loaded: ${w}×${h} → ${mw}×${mh}`,
+            encoding: name => `Encoding ${name}…`,
+            done: (d, kb) => `✓ Encoding done: ${d} s, ${kb} KB, 16-bit mono PCM 44,100 Hz`,
+            error: 'Error: '
+        }
+    };
+    const T = TEXT[LANG];
+    document.documentElement.lang = LANG;
+    document.title = T.title;
+    document.querySelectorAll('[data-t]').forEach(e => { e.textContent = T[e.dataset.t]; });
     // ==========================================================================
     // DÉFINITIONS DES MODES SSTV
     // ==========================================================================
@@ -473,14 +529,14 @@
         const opts = document.getElementById('advancedOptions');
         const toggle = document.querySelector('.advanced-toggle');
         opts.classList.toggle('show');
-        toggle.textContent = opts.classList.contains('show') ? '▼ Options avancées' : '▶ Options avancées';
+        toggle.textContent = (opts.classList.contains('show') ? '▼ ' : '▶ ') + T.advanced;
     }
     
     function updateModeInfo() {
         const mode = SSTV_MODES[document.getElementById('sstvMode').value];
         const desc = document.getElementById('modeDescription');
         const estTime = estimateTransmissionTime(mode);
-        desc.innerHTML = `Résolution: ${mode.width}×${mode.height} | Couleur: ${mode.colorMode.toUpperCase()} | Durée estimée: ~${estTime}s`;
+        desc.textContent = T.mode_info(mode.width, mode.height, mode.colorMode.toUpperCase(), estTime);
     }
     
     function estimateTransmissionTime(mode) {
@@ -558,7 +614,7 @@
         
         const info = document.getElementById('imageInfo');
         info.style.display = 'block';
-        info.innerHTML = `Image chargée: ${img.width}×${img.height} → ${mode.width}×${mode.height}`;
+        info.textContent = T.loaded(img.width, img.height, mode.width, mode.height);
     }
     
     // ==========================================================================
@@ -905,7 +961,7 @@
         
         function performEncode() {
             try {
-                status.textContent = `Encodage ${mode.name}...`;
+                status.textContent = T.encoding(mode.name);
                 const result = buildWAV(imageData, modeName, options, percent => {
                     progressFill.style.width = percent + '%';
                 });
@@ -919,13 +975,13 @@
                 URL.revokeObjectURL(url);
                 
                 const sizeKB = Math.round(wavBlob.size / 1024);
-                status.textContent = `✓ Encodage terminé ! Durée: ${result.seconds.toFixed(1)}s | Taille: ${sizeKB} KB | PCM 16 bits mono 44 100 Hz`;
+                status.textContent = T.done(result.seconds.toFixed(1), sizeKB);
                 status.style.borderLeftColor = '#00ff88';
                 
             } catch (error) {
                 console.error(error);
                 errorDiv.style.display = 'block';
-                errorDiv.textContent = 'Erreur: ' + error.message;
+                errorDiv.textContent = T.error + error.message;
             } finally {
                 encodeBtn.disabled = false;
             }

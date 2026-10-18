@@ -6,7 +6,7 @@
                détection VIS, PLL, AFC, correction Doppler et d'inclinaison,
                modes Robot, Martin, Scottie, PD ; export PNG
   Auteur     : Eric PERRET
-  Version    : 1.11
+  Version    : 1.12
   Date       : 2026-10-17
   Plateforme : HTML / CSS / JavaScript, Web Audio, fichier unique, aucune librairie
   Historique :
@@ -73,13 +73,16 @@
                      affichée aussi en cas d'échec au démarrage ; capture
                      par ScriptProcessor si l'AudioWorklet ne se charge pas
                      (page ouverte en fichier local)
+    1.12 (2026-10-18) interface en français ou en anglais selon la langue du
+                     navigateur ; sélecteur du mode fichier construit à partir
+                     de la table des modes
 ================================================================================
 -->
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Décodeur SSTV v1.11</title>
+    <title>SSTV v1.12</title>
     <style>
         body {
             font-family: 'Consolas', 'Monaco', monospace;
@@ -195,6 +198,9 @@
             image-rendering: pixelated;
         }
         @media (max-width: 600px) {
+            table.results { font-size: 11px; }
+            table.results td, table.results th { padding: 3px; }
+            table.results td.num { white-space: normal; }
             body { padding: 6px; }
             .container { padding: 12px; }
             .control-group { padding: 10px; }
@@ -270,79 +276,47 @@
 </head>
 <body>
     <div class="container">
-        <h1>📡 SSTV Decoder Ultimate</h1>
-        <p class="subtitle">Version 1.11 — Fichier WAV et micro en direct</p>
+        <h1 data-t="h1"></h1>
+        <p class="subtitle" data-t="subtitle"></p>
         
         <!-- TABS -->
         <div class="tabs" style="display:flex;gap:5px;margin-bottom:15px;">
-            <button class="tab-btn active" onclick="switchTab('file')" id="tabFile" style="padding:10px 25px;background:#0f0f18;border:2px solid #00ff00;color:#00ff00;cursor:pointer;border-radius:5px 5px 0 0;font-weight:bold;">📁 WAV File</button>
-            <button class="tab-btn" onclick="switchTab('live')" id="tabLive" style="padding:10px 25px;background:#0a0a10;border:2px solid #333;color:#888;cursor:pointer;border-radius:5px 5px 0 0;font-weight:bold;">🎤 Live Audio</button>
+            <button class="tab-btn active" onclick="switchTab('file')" data-t="tab_file" id="tabFile" style="padding:10px 25px;background:#0f0f18;border:2px solid #00ff00;color:#00ff00;cursor:pointer;border-radius:5px 5px 0 0;font-weight:bold;"></button>
+            <button class="tab-btn" onclick="switchTab('live')" data-t="tab_live" id="tabLive" style="padding:10px 25px;background:#0a0a10;border:2px solid #333;color:#888;cursor:pointer;border-radius:5px 5px 0 0;font-weight:bold;"></button>
         </div>
         
         <!-- FILE TAB -->
         <div id="fileTabContent" class="tab-content" style="display:block;">
         
         <div class="control-group">
-            <h3>1. Fichier WAV</h3>
+            <h3 data-t="h_file"></h3>
             <input type="file" id="fileInput" accept=".wav,audio/wav">
             <div id="fileInfo" class="info" style="display:none;"></div>
             <div id="status" class="info warn" style="display:none;"></div>
         </div>
         
         <div class="control-group">
-            <h3 id="imageTitle">2. Image décodée</h3>
+            <h3 id="imageTitle" data-t="h_image"></h3>
             <canvas id="canvas" width="320" height="240"></canvas>
             <div style="text-align:center;">
-                <button id="saveBtn" disabled style="border-color:#00ffff;color:#00ffff;">💾 Sauvegarder PNG</button>
+                <button id="saveBtn" disabled style="border-color:#00ffff;color:#00ffff;" data-t="save_png"></button>
             </div>
         </div>
         
         <div class="control-group">
-            <h3>3. Mesures</h3>
-            <span>Mode : </span>
-            <select id="forceMode">
-                        <option value="auto">Automatique (VIS)</option>
-                        <optgroup label="Robot">
-                            <option value="robot36">Robot36</option>
-                            <option value="robot36nb">Robot36 N&amp;B</option>
-                            <option value="robot72">Robot72</option>
-                            <option value="robot72nb">Robot72 N&amp;B</option>
-                        </optgroup>
-                        <optgroup label="Martin">
-                            <option value="martinM1">Martin M1</option>
-                            <option value="martinM1nb">Martin M1 N&amp;B</option>
-                            <option value="martinM2">Martin M2</option>
-                            <option value="martinM2nb">Martin M2 N&amp;B</option>
-                        </optgroup>
-                        <optgroup label="Scottie">
-                            <option value="scottieS1">Scottie S1</option>
-                            <option value="scottieS1nb">Scottie S1 N&amp;B</option>
-                            <option value="scottieS2">Scottie S2</option>
-                            <option value="scottieS2nb">Scottie S2 N&amp;B</option>
-                        </optgroup>
-                        <optgroup label="PD">
-                            <option value="pd90">PD90</option>
-                            <option value="pd90nb">PD90 N&amp;B</option>
-                            <option value="pd120">PD120</option>
-                            <option value="pd120nb">PD120 N&amp;B</option>
-                            <option value="pd160">PD160</option>
-                            <option value="pd160nb">PD160 N&amp;B</option>
-                            <option value="pd180">PD180</option>
-                            <option value="pd180nb">PD180 N&amp;B</option>
-                            <option value="pd240">PD240</option>
-                            <option value="pd240nb">PD240 N&amp;B</option>
-                        </optgroup>
-                    </select>
+            <h3 data-t="h_results"></h3>
+            <span data-t="mode_label"></span>
+            <select id="forceMode"></select>
             <table id="results" class="results"></table>
         </div>
         
         <div class="control-group">
-            <h3>4. Écart des synchros au rythme nominal (ms), droite mesurée</h3>
+            <h3 data-t="h_drift"></h3>
             <canvas id="driftCanvas" class="plot" height="220"></canvas>
         </div>
         
         <div class="control-group">
-            <h3>5. Fréquence instantanée (cliquer pour mesurer)</h3>
+            <h3 data-t="h_freq"></h3>
             <div class="zoom-controls">
                 <span>Zoom</span>
                 <input type="range" id="zoomRange" min="0" max="200" value="0">
@@ -360,7 +334,7 @@
         <div id="liveTabContent" class="tab-content" style="display:none;">
         
         <div class="control-group">
-            <h3>🎤 Audio Capture</h3>
+            <h3 data-t="h_capture"></h3>
             <div style="display:flex;justify-content:center;gap:15px;margin-bottom:15px;">
                 <button id="startLiveBtn" style="padding:15px 30px;font-size:16px;">▶ START</button>
                 <button id="stopLiveBtn" disabled style="padding:15px 30px;font-size:16px;border-color:#ff4444;color:#ff4444;">■ STOP</button>
@@ -390,9 +364,9 @@
                 <div class="progress-fill" id="liveProgressFill"></div>
             </div>
             <div style="text-align:center;margin-top:10px;">
-                <button id="liveSaveBtn" style="border-color:#00ffff;color:#00ffff;">💾 Sauvegarder PNG</button>
-                <button id="liveClearBtn">🗑️ Effacer</button>
-                <button id="liveRecordBtn" disabled>⏺ Enregistrer la capture</button>
+                <button id="liveSaveBtn" style="border-color:#00ffff;color:#00ffff;" data-t="save_png"></button>
+                <button id="liveClearBtn" data-t="clear"></button>
+                <button id="liveRecordBtn" disabled data-t="rec_start"></button>
             </div>
         </div>
         
@@ -402,6 +376,87 @@
     </div>
 
     <script>
+    // ==========================================================================
+    // LANGUE : celle du navigateur, français sinon anglais
+    // ==========================================================================
+    
+    const LANG = (navigator.language || 'en').toLowerCase().startsWith('fr') ? 'fr' : 'en';
+    const TEXT = {
+        fr: {
+            title: 'Décodeur SSTV v1.12',
+            h1: '📡 Décodeur SSTV Ultimate',
+            subtitle: 'Version 1.12 — Fichier WAV et micro en direct',
+            tab_file: '📁 Fichier WAV', tab_live: '🎤 Micro',
+            h_file: '1. Fichier WAV', h_image: '2. Image décodée', h_results: '3. Mesures',
+            h_drift: '4. Écart des synchros au rythme nominal (ms), droite mesurée',
+            h_freq: '5. Fréquence instantanée (cliquer pour mesurer)',
+            mode_label: 'Mode : ', mode_auto: 'Automatique (VIS)', bw: ' N&B',
+            zoom: 'Zoom', position: 'Position',
+            save_png: '💾 Sauvegarder PNG', clear: '🗑️ Effacer',
+            rec_start: '⏺ Enregistrer la capture', rec_stop: '⏹ Arrêter et sauvegarder',
+            h_capture: '🎤 Capture micro',
+            file_info: (r, ch, bits, d) => `${r} Hz, ${ch} voie(s), ${bits} bits, ${d} s`,
+            level: (rms, peak) => `${rms} dBFS efficace, crête ${peak} dBFS`,
+            mic_insecure: 'Micro indisponible : page non sécurisée',
+            mic_none: 'Aucun micro détecté',
+            mic_denied: 'Accès au micro refusé par le navigateur',
+            mic_busy: 'Micro déjà utilisé par une autre application',
+            mic_other: 'Micro indisponible',
+            no_vis: 'VIS non trouvé : choisir le mode.',
+            no_sync: 'Pas assez de synchros trouvées pour mesurer l\'horloge.',
+            col_item: 'Mesure', col_meas: 'Mesuré', col_nom: 'Nominal',
+            vis_code: 'Code VIS', vis_none: 'non trouvé',
+            vis_start: 'Bit de start du VIS', image_start: 'Début d\'image',
+            leader: 'Fréquence de l\'amorce', mode: 'Mode',
+            syncs: 'Synchros trouvées / attendues', syncs_used: 'Synchros retenues pour la droite',
+            period: 'Période de ligne', clock: 'Écart d\'horloge',
+            drift: 'Dérive cumulée sur l\'image au rythme nominal',
+            pixels: 'pixels', resid: 'Écart des synchros à la droite (max / efficace)',
+            sync_len: 'Durée de synchro (médiane)', sync_freq: 'Fréquence de synchro (médiane)',
+            afc: 'Décalage de fréquence corrigé (AFC)',
+            image_len: 'Durée de l\'image',
+            meas_a: 'A :', meas_b: 'B :', meas_d: 'Δt ='
+        },
+        en: {
+            title: 'SSTV Decoder v1.12',
+            h1: '📡 SSTV Decoder Ultimate',
+            subtitle: 'Version 1.12 — WAV file and live microphone',
+            tab_file: '📁 WAV file', tab_live: '🎤 Microphone',
+            h_file: '1. WAV file', h_image: '2. Decoded image', h_results: '3. Measurements',
+            h_drift: '4. Sync deviation from nominal timing (ms), measured line',
+            h_freq: '5. Instantaneous frequency (click to measure)',
+            mode_label: 'Mode: ', mode_auto: 'Automatic (VIS)', bw: ' B&W',
+            zoom: 'Zoom', position: 'Position',
+            save_png: '💾 Save PNG', clear: '🗑️ Clear',
+            rec_start: '⏺ Record capture', rec_stop: '⏹ Stop and save',
+            h_capture: '🎤 Microphone capture',
+            file_info: (r, ch, bits, d) => `${r} Hz, ${ch} channel(s), ${bits}-bit, ${d} s`,
+            level: (rms, peak) => `${rms} dBFS RMS, peak ${peak} dBFS`,
+            mic_insecure: 'Microphone unavailable: page is not secure',
+            mic_none: 'No microphone found',
+            mic_denied: 'Microphone access denied by the browser',
+            mic_busy: 'Microphone already in use by another application',
+            mic_other: 'Microphone unavailable',
+            no_vis: 'VIS not found: choose the mode.',
+            no_sync: 'Not enough sync pulses found to measure the clock.',
+            col_item: 'Item', col_meas: 'Measured', col_nom: 'Nominal',
+            vis_code: 'VIS code', vis_none: 'not found',
+            vis_start: 'VIS start bit', image_start: 'Image start',
+            leader: 'Leader frequency', mode: 'Mode',
+            syncs: 'Sync pulses found / expected', syncs_used: 'Sync pulses used for the line fit',
+            period: 'Line period', clock: 'Clock error',
+            drift: 'Cumulative drift over the image at nominal timing',
+            pixels: 'pixels', resid: 'Sync deviation from the fitted line (max / RMS)',
+            sync_len: 'Sync duration (median)', sync_freq: 'Sync frequency (median)',
+            afc: 'Frequency offset corrected (AFC)',
+            image_len: 'Image duration',
+            meas_a: 'A:', meas_b: 'B:', meas_d: 'Δt ='
+        }
+    };
+    const T = TEXT[LANG];
+    document.documentElement.lang = LANG;
+    document.title = T.title;
+    document.querySelectorAll('[data-t]').forEach(e => { e.textContent = T[e.dataset.t]; });
     // ==========================================================================
     // MODE DEFINITIONS (EXACT SPECS)
     // ==========================================================================
@@ -436,7 +491,7 @@
     // Variante N&B de chaque mode : même signal, seule la luminance est
     // affichée (la chrominance, très sensible au bruit, est ignorée)
     for (const key of Object.keys(SSTV_MODES)) {
-        SSTV_MODES[key + 'nb'] = Object.assign({}, SSTV_MODES[key], { name: SSTV_MODES[key].name + ' N&B', bw: true });
+        SSTV_MODES[key + 'nb'] = Object.assign({}, SSTV_MODES[key], { name: SSTV_MODES[key].name + T.bw, bw: true });
     }
     
     // Sous-modes de chaque famille, dans l'ordre de défilement : chaque mode
@@ -448,6 +503,25 @@
         scottie: ['scottieS1', 'scottieS2'],
         pd:      ['pd90', 'pd120', 'pd160', 'pd180', 'pd240']
     })) FAMILIES[f] = list.flatMap(k => [k, k + 'nb']);
+    
+    // Sélecteur du mode fichier : automatique, puis chaque famille
+    (function buildModeSelect() {
+        const sel = document.getElementById('forceMode');
+        const auto = document.createElement('option');
+        auto.value = 'auto'; auto.textContent = T.mode_auto;
+        sel.appendChild(auto);
+        const labels = { robot: 'Robot', martin: 'Martin', scottie: 'Scottie', pd: 'PD' };
+        for (const [f, list] of Object.entries(FAMILIES)) {
+            const g = document.createElement('optgroup');
+            g.label = labels[f];
+            for (const k of list) {
+                const o = document.createElement('option');
+                o.value = k; o.textContent = SSTV_MODES[k].name;
+                g.appendChild(o);
+            }
+            sel.appendChild(g);
+        }
+    })();
     
     // VIS code mapping
     const VIS_TO_MODE = {};
@@ -518,7 +592,7 @@
                 demodulateFullAudio();
                 const info = document.getElementById('fileInfo');
                 info.style.display = 'block';
-                info.textContent = `${sampleRate} Hz, ${wavFormat.channels} voie(s), ${wavFormat.bits} bits, ${(audioData.length / sampleRate).toFixed(2)} s`;
+                info.textContent = T.file_info(sampleRate, wavFormat.channels, wavFormat.bits, (audioData.length / sampleRate).toFixed(2));
                 markA = markB = null;
                 document.getElementById('measure').textContent = '';
                 runFile();
@@ -1180,7 +1254,7 @@
         const imgData = ctx.createImageData(mode.width, mode.height);
         imgData.data.set(dec.image);
         ctx.putImageData(imgData, 0, 0);
-        document.getElementById('imageTitle').textContent = '2. Image décodée — ' + mode.name;
+        document.getElementById('imageTitle').textContent = T.h_image + ' — ' + mode.name;
         document.getElementById('saveBtn').disabled = false;
     }
     
@@ -1191,32 +1265,6 @@
     let diagTrack = null;     // piste de fréquence du fichier
     let diagResult = null;    // dernières mesures
     let markA = null, markB = null;
-    const T = {
-            subtitle: 'Version 2.0 — analyse d\'un enregistrement WAV',
-            h_file: '1. Fichier WAV',
-            h_results: '2. Mesures',
-            h_drift: '3. Écart des synchros au rythme nominal (ms), droite mesurée',
-            h_freq: '4. Fréquence instantanée (cliquer pour mesurer)',
-            mode_label: 'Mode : ',
-            mode_auto: 'Automatique (VIS)',
-            zoom: 'Zoom',
-            position: 'Position',
-            file_info: (r, ch, bits, d) => `${r} Hz, ${ch} voie(s), ${bits} bits, ${d} s`,
-            no_vis: 'VIS non trouvé : choisir le mode.',
-            no_sync: 'Pas assez de synchros trouvées pour mesurer l\'horloge.',
-            col_item: 'Mesure', col_meas: 'Mesuré', col_nom: 'Nominal',
-            vis_code: 'Code VIS', vis_none: 'non trouvé',
-            vis_start: 'Bit de start du VIS', image_start: 'Début d\'image',
-            leader: 'Fréquence de l\'amorce', mode: 'Mode',
-            syncs: 'Synchros trouvées / attendues', syncs_used: 'Synchros retenues pour la droite',
-            period: 'Période de ligne', clock: 'Écart d\'horloge',
-            drift: 'Dérive cumulée sur l\'image au rythme nominal',
-            pixels: 'pixels', resid: 'Écart des synchros à la droite (max / efficace)',
-            sync_len: 'Durée de synchro (médiane)', sync_freq: 'Fréquence de synchro (médiane)',
-            image_len: 'Durée de l\'image',
-            meas_a: 'A :', meas_b: 'B :', meas_d: 'Δt =',
-            afc: 'Décalage de fréquence corrigé (AFC)'
-    };
     
     // Début de synchro : front descendant pris à mi-chemin entre le niveau qui
     // précède et 1200 Hz (même critère que la fin de synchro, 1350 Hz étant
@@ -1275,7 +1323,7 @@
     function clearImage() {
         const c = document.getElementById('canvas');
         c.getContext('2d').clearRect(0, 0, c.width, c.height);
-        document.getElementById('imageTitle').textContent = '2. Image décodée';
+        document.getElementById('imageTitle').textContent = T.h_image;
         document.getElementById('saveBtn').disabled = true;
     }
     
@@ -1782,16 +1830,16 @@
     async function checkMic() {
         let reason = null;
         if (!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-            reason = 'Micro indisponible : page non sécurisée';
+            reason = T.mic_insecure;
         } else {
             try {
                 const devices = await navigator.mediaDevices.enumerateDevices();
-                if (!devices.some(d => d.kind === 'audioinput')) reason = 'Aucun micro détecté';
+                if (!devices.some(d => d.kind === 'audioinput')) reason = T.mic_none;
             } catch (e) { /* liste indisponible : l'essai de démarrage tranchera */ }
             if (!reason && navigator.permissions && navigator.permissions.query) {
                 try {
                     const perm = await navigator.permissions.query({ name: 'microphone' });
-                    if (perm.state === 'denied') reason = 'Accès au micro refusé par le navigateur';
+                    if (perm.state === 'denied') reason = T.mic_denied;
                     perm.onchange = () => checkMic();
                 } catch (e) { /* requête non prise en charge */ }
             }
@@ -1810,10 +1858,10 @@
     
     function micMessage(err) {
         const name = err && err.name;
-        if (name === 'NotFoundError' || name === 'DevicesNotFoundError' || name === 'OverconstrainedError') return 'Aucun micro détecté';
-        if (name === 'NotAllowedError' || name === 'PermissionDeniedError' || name === 'SecurityError') return 'Accès au micro refusé par le navigateur';
-        if (name === 'NotReadableError' || name === 'TrackStartError' || name === 'AbortError') return 'Micro déjà utilisé par une autre application';
-        return 'Micro indisponible' + (err && err.message ? ' : ' + err.message : '');
+        if (name === 'NotFoundError' || name === 'DevicesNotFoundError' || name === 'OverconstrainedError') return T.mic_none;
+        if (name === 'NotAllowedError' || name === 'PermissionDeniedError' || name === 'SecurityError') return T.mic_denied;
+        if (name === 'NotReadableError' || name === 'TrackStartError' || name === 'AbortError') return T.mic_busy;
+        return T.mic_other + (err && err.message ? ' (' + err.message + ')' : '');
     }
     
     // START : nouvelle vérification, puis démarrage ou raison affichée
@@ -2022,14 +2070,14 @@
     function toggleLiveRecord() {
         if (liveRecord) { saveLiveRecord(); return; }
         liveRecord = { chunks: [], length: 0, start: new Date() };
-        document.getElementById('liveRecordBtn').textContent = '⏹ Arrêter et sauvegarder';
+        document.getElementById('liveRecordBtn').textContent = T.rec_stop;
         liveLog('Enregistrement de la capture démarré');
     }
     
     function saveLiveRecord() {
         const rec = liveRecord;
         liveRecord = null;
-        document.getElementById('liveRecordBtn').textContent = '⏺ Enregistrer la capture';
+        document.getElementById('liveRecordBtn').textContent = T.rec_start;
         if (!rec || rec.length === 0) return;
         
         const n = rec.length;
@@ -2070,10 +2118,10 @@
         bar.style.background = peak > -1 ? '#ff3333' : (rms < -60 ? '#ccaa00' : '#00cc00');
         document.getElementById('levelPeak').style.left = pos(livePeak) + '%';
         document.getElementById('levelText').textContent =
-            `${rms > -100 ? rms.toFixed(0) : '--'} dBFS efficace, crête ${peak > -100 ? peak.toFixed(0) : '--'} dBFS`;
+            T.level(rms > -100 ? rms.toFixed(0) : '--', peak > -100 ? peak.toFixed(0) : '--');
         if (liveRecord) {
             document.getElementById('liveRecordBtn').textContent =
-                `⏹ Arrêter et sauvegarder (${(liveRecord.length / liveRate).toFixed(0)} s)`;
+                `${T.rec_stop} (${(liveRecord.length / liveRate).toFixed(0)} s)`;
         }
     }
     
