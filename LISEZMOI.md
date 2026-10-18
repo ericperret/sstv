@@ -3,7 +3,7 @@
   Objet    : Présentation du dépôt sstv (émission, réception et diagnostic SSTV)
   Auteur   : Eric PERRET
   Date     : 2026-10-17
-  Version  : 1.1
+  Version  : 1.2
   Licence  : CC BY-NC 4.0
 -->
 
@@ -41,7 +41,7 @@ Télévision à balayage lent (SSTV) dans le navigateur : émission d'une image 
 
 | Fonction | Description |
 |---|---|
-| Sources | Fichier WAV (8 / 16 / 24 / 32 bits ou flottant, mono ou stéréo, toute fréquence d'échantillonnage), ou audio en direct (micro, autorisation demandée) |
+| Sources | Fichier WAV (8 / 16 / 24 / 32 bits ou flottant, mono ou stéréo, toute fréquence d'échantillonnage), ou micro en direct à sa fréquence native (adapté au téléphone, écran maintenu allumé) |
 | Modes | Détection automatique par code VIS, ou forcé : Robot36 / 72, Martin M1 / M2, Scottie S1 / S2, PD90 à PD240 |
 | Synchronisation | Robot36 : synchro suivie ligne par ligne et horloge mesurée (pas d'inclinaison) ; AFC automatique, décalage Doppler manuel |
 | Analyse | Analyse du signal, affichage de l'image au fil du décodage, journal de débogage |
@@ -70,6 +70,7 @@ La SSTV sert aux radioamateurs pour transmettre des images en HF / VHF. Ces outi
 |---|---|
 | 2026-10-17 | Fichiers renommés sans suffixe de copie, cartouches, page d'accueil corrigée, README / LISEZMOI réécrits |
 | 2026-10-17 | Émetteur 4.1 : VIS normalisé, temps exact, Robot36 corrigé. Décodeur 1.1 : détection VIS, tout format WAV, suivi de synchro Robot36. Validé par un décodeur externe et des enregistrements ARISS / PySSTV (Robot36 seul) |
+| 2026-10-17 | Décodeur 1.2 : réception micro sur la même chaîne que les fichiers (VIS, suivi de synchro et horloge mesurée Robot36), testée en couplage acoustique simulé |
 
 ## Licence
 

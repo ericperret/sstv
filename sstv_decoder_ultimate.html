@@ -6,7 +6,7 @@
                détection VIS, PLL, AFC, correction Doppler et d'inclinaison,
                modes Robot, Martin, Scottie, PD ; export PNG
   Auteur     : Eric PERRET
-  Version    : 1.1
+  Version    : 1.2
   Date       : 2026-10-17
   Plateforme : HTML / CSS / JavaScript, Web Audio, fichier unique, aucune librairie
   Historique :
@@ -18,6 +18,13 @@
                      des moindres carrés (pas d'inclinaison), chrominance
                      identifiée par le séparateur 1500 / 2300 Hz et partagée
                      par couple de lignes, couleur BT.601 échelle studio
+    1.2 (2026-10-17) mode micro : fréquence d'échantillonnage du micro reprise
+                     telle quelle, capture AudioWorklet, démodulation en flux
+                     (mélange 1900 Hz + FIR), même chaîne que le mode fichier
+                     (VIS, suivi de synchro et horloge mesurée Robot36, image
+                     redessinée en fin de réception) ; décisions VIS par
+                     médianes (robustes au bruit) ; affichage adapté au
+                     téléphone, écran maintenu allumé pendant la capture
 ================================================================================
 -->
 <html lang="fr">
@@ -89,6 +96,17 @@
         button:disabled:hover {
             background-color: #0a0a10;
             color: #333;
+        }
+        #canvas, #liveCanvas {
+            width: 100%;
+            max-width: 640px;
+            height: auto;
+            image-rendering: pixelated;
+        }
+        @media (max-width: 600px) {
+            body { padding: 6px; }
+            .container { padding: 12px; }
+            .control-group { padding: 10px; }
         }
         #canvas {
             border: 2px solid #00ff00;
@@ -628,7 +646,7 @@
                 const frames = Math.floor(bytes / fmt.blockAlign);
                 audioData = new Float32Array(frames);
                 demodulatedFreq = null;
-                freqSum = null;
+                fileTrack = null;
                 
                 // Voie 1 uniquement
                 for (let i = 0; i < frames; i++) {
@@ -974,74 +992,135 @@
     // VIS CODE DETECTION
     // ==========================================================================
     
-    // Somme cumulée de la fréquence démodulée : moyenne sur un intervalle en O(1)
-    let freqSum = null;
+    // ==========================================================================
+    // PISTE DE FRÉQUENCE : fréquence instantanée + somme cumulée, moyenne d'un
+    // intervalle en O(1) ; alimentée d'un bloc (fichier) ou au fil de l'eau (micro)
+    // ==========================================================================
+    
+    function FreqTrack(rate, capacity) {
+        this.rate = rate;
+        this.f = new Float32Array(Math.max(1024, capacity || rate * 10));
+        this.sum = new Float64Array(this.f.length + 1);
+        this.len = 0;
+    }
+    
+    FreqTrack.prototype.push = function (values) {
+        const need = this.len + values.length;
+        if (need > this.f.length) {
+            let size = this.f.length * 2;
+            while (size < need) size *= 2;
+            const nf = new Float32Array(size); nf.set(this.f.subarray(0, this.len));
+            const ns = new Float64Array(size + 1); ns.set(this.sum.subarray(0, this.len + 1));
+            this.f = nf; this.sum = ns;
+        }
+        for (let i = 0; i < values.length; i++) {
+            this.f[this.len] = values[i];
+            this.sum[this.len + 1] = this.sum[this.len] + values[i];
+            this.len++;
+        }
+    };
+    
+    FreqTrack.prototype.mean = function (start, end) {
+        const a = Math.max(0, Math.min(this.len, Math.round(start)));
+        const b = Math.max(0, Math.min(this.len, Math.round(end)));
+        return b > a ? (this.sum[b] - this.sum[a]) / (b - a) : 0;
+    };
+    
+    // Médiane sur un intervalle : insensible aux pointes du bruit
+    FreqTrack.prototype.median = function (start, end) {
+        const a = Math.max(0, Math.min(this.len, Math.round(start)));
+        const b = Math.max(0, Math.min(this.len, Math.round(end)));
+        if (b <= a) return 0;
+        const v = this.f.slice(a, b).sort();
+        return v[v.length >> 1];
+    };
+    
+    // Garde les 'seconds' dernières secondes ; renvoie le décalage d'indice
+    FreqTrack.prototype.keepTail = function (seconds) {
+        const keep = Math.min(this.len, Math.round(seconds * this.rate));
+        const shift = this.len - keep;
+        const t = new FreqTrack(this.rate, this.f.length);
+        t.push(this.f.subarray(shift, this.len));
+        this.f = t.f; this.sum = t.sum; this.len = t.len;
+        return shift;
+    };
+    
+    let fileTrack = null;
+    
+    function getFileTrack() {
+        if (!demodulatedFreq) demodulateFullAudio();
+        if (!fileTrack) {
+            fileTrack = new FreqTrack(sampleRate, demodulatedFreq.length);
+            fileTrack.push(demodulatedFreq);
+        }
+        return fileTrack;
+    }
     
     function meanFreq(start, end) {
-        if (!freqSum) {
-            freqSum = new Float64Array(demodulatedFreq.length + 1);
-            for (let i = 0; i < demodulatedFreq.length; i++) freqSum[i + 1] = freqSum[i] + demodulatedFreq[i];
-        }
-        const a = Math.max(0, Math.min(demodulatedFreq.length, Math.round(start)));
-        const b = Math.max(0, Math.min(demodulatedFreq.length, Math.round(end)));
-        return b > a ? (freqSum[b] - freqSum[a]) / (b - a) : 0;
+        return getFileTrack().mean(start, end);
     }
     
     // VIS : amorce 1900 Hz, front vers le bit de start 1200 Hz (repère), 7 bits
     // de 30 ms poids faible en premier (1100 Hz = 1, 1300 Hz = 0), parité paire,
     // stop 1200 Hz. L'image commence à la fin du stop (repère + 300 ms).
-    function detectVIS() {
-        if (!demodulatedFreq) demodulateFullAudio();
+    // Repères examinés de 'from' à 'to' (échantillons). Résultat ou null.
+    function findVIS(track, from, to, off, logFn) {
+        const spm = track.rate / 1000;
+        const step = Math.max(1, Math.floor(spm));
+        const first = Math.max(Math.ceil(300 * spm), Math.floor(from));
+        const last = Math.min(Math.floor(to), track.len - Math.ceil(320 * spm));
         
-        log('Searching for VIS code...');
-        
-        const spm = sampleRate / 1000;
-        const f = demodulatedFreq;
-        const off = dopplerOffset;
-        const last = f.length - Math.ceil(320 * spm);
-        
-        for (let e = Math.ceil(300 * spm); e < last; e += Math.max(1, Math.floor(spm))) {
-            // Amorce avant, bit de start après
-            if (Math.abs(meanFreq(e - 250 * spm, e - 20 * spm) - 1900 - off) > 60) continue;
-            if (Math.abs(meanFreq(e + 5 * spm, e + 25 * spm) - 1200 - off) > 60) continue;
+        for (let e = first; e < last; e += step) {
+            // Amorce avant, bit de start après (tri grossier par moyennes)
+            const lead = track.mean(e - 250 * spm, e - 20 * spm);
+            if (Math.abs(lead - 1900 - off) > 100) continue;
+            if (track.mean(e + 5 * spm, e + 25 * spm) > lead - 250) continue;
             
-            // Front précis amorce -> start (seuil 1550 Hz)
-            const thr = 1550 + off;
-            let edge = -1;
+            // Front précis amorce -> start : plus forte chute de fréquence
+            // moyenne entre 5 ms avant et 5 ms après
+            let edge = -1, drop = 250;
             for (let i = Math.floor(e - 15 * spm); i < e + 15 * spm; i++) {
-                if (meanFreq(i - 0.5 * spm, i) >= thr && meanFreq(i, i + 0.5 * spm) < thr) { edge = i; break; }
+                const d = track.mean(i - 5 * spm, i) - track.mean(i, i + 5 * spm);
+                if (d > drop) { drop = d; edge = i; }
             }
             if (edge < 0) continue;
             
-            // 7 bits de données + parité
+            // Décisions par médianes : start, 7 bits + parité, stop
+            const med = (i0, i1) => track.median(edge + i0 * spm, edge + i1 * spm) - off;
+            if (Math.abs(med(5, 25) - 1200) > 100) continue;
             const bits = [];
             let valid = true;
             for (let b = 0; b < 8; b++) {
-                const m = meanFreq(edge + (30 * (b + 1) + 5) * spm, edge + (30 * (b + 2) - 5) * spm);
-                if (Math.abs(m - 1100 - off) > 80 && Math.abs(m - 1300 - off) > 80) { valid = false; break; }
-                bits.push(m < 1200 + off ? 1 : 0);
+                const m = med(30 * (b + 1) + 5, 30 * (b + 2) - 5);
+                if (Math.abs(m - 1100) > 100 && Math.abs(m - 1300) > 100) { valid = false; break; }
+                bits.push(m < 1200 ? 1 : 0);
             }
             if (!valid) continue;
-            
-            const stop = meanFreq(edge + 275 * spm, edge + 295 * spm);
-            if (Math.abs(stop - 1200 - off) > 60) continue;
+            if (Math.abs(med(275, 295) - 1200) > 100) continue;
             
             let visCode = 0, ones = 0;
             for (let b = 0; b < 7; b++) { visCode |= bits[b] << b; ones += bits[b]; }
             if ((ones + bits[7]) % 2 !== 0) {
-                log(`VIS 0x${visCode.toString(16).toUpperCase()} rejeté (parité) à ${(edge / sampleRate).toFixed(3)}s`);
+                logFn(`VIS 0x${visCode.toString(16).toUpperCase()} rejeté (parité) à ${(edge / track.rate).toFixed(3)}s`);
+                e = edge + 300 * spm;
                 continue;
             }
             
             const imageStart = Math.round(edge + 300 * spm);
-            log(`VIS start bit at ${(edge / sampleRate).toFixed(4)}s, bits ${bits.slice(0, 7).join('')} parity ${bits[7]}`);
-            log(`VIS code: 0x${visCode.toString(16).toUpperCase()} (${visCode})`);
-            log(`Image starts at ${(imageStart / sampleRate * 1000).toFixed(2)}ms`);
+            logFn(`VIS start bit at ${(edge / track.rate).toFixed(4)}s, bits ${bits.slice(0, 7).join('')} parity ${bits[7]}`);
+            logFn(`VIS code: 0x${visCode.toString(16).toUpperCase()} (${visCode})`);
             return { visCode, imageStart, leaderStart: Math.round(edge - 610 * spm) };
         }
-        
-        log('No VIS found');
         return null;
+    }
+    
+    function detectVIS() {
+        const track = getFileTrack();
+        log('Searching for VIS code...');
+        const vis = findVIS(track, 0, track.len, dopplerOffset, log);
+        if (vis) log(`Image starts at ${(vis.imageStart / sampleRate * 1000).toFixed(2)}ms`);
+        else log('No VIS found');
+        return vis;
     }
     
     // ==========================================================================
@@ -1223,25 +1302,29 @@
     // ROBOT MODE DECODER
     // ==========================================================================
     
-    // Fin de synchro (montée 1200 -> 1500 Hz, seuil 1350 Hz) la plus proche de
-    // 'expected' dans ±winMs ; position fractionnaire en échantillons, ou -1
-    function findSyncEnd(expected, winMs, syncMs) {
-        const spm = sampleRate / 1000;
-        const f = demodulatedFreq;
-        const thr = 1350 + dopplerOffset;
-        const a = Math.max(1, Math.floor(expected - winMs * spm));
-        const b = Math.min(f.length - 1, Math.ceil(expected + winMs * spm));
+    // Fin de synchro (montée 1200 -> 1500 Hz, seuil 1350 Hz, fréquence lissée
+    // sur ±0,4 ms) la plus proche de 'expected' dans ±winMs ; position
+    // fractionnaire en échantillons, ou -1
+    function findSyncEnd(track, expected, winMs, syncMs, off) {
+        const spm = track.rate / 1000;
+        const h = 0.4 * spm;
+        const thr = 1350 + off;
+        const a = Math.max(Math.ceil(h) + 1, Math.floor(expected - winMs * spm));
+        const b = Math.min(track.len - Math.ceil(3 * spm), Math.ceil(expected + winMs * spm));
         let best = -1, bestDist = Infinity;
+        let prev = track.mean(a - 1 - h, a - 1 + h);
         
         for (let i = a; i <= b; i++) {
-            if (f[i - 1] < thr && f[i] >= thr) {
-                const pos = i - 1 + (thr - f[i - 1]) / (f[i] - f[i - 1]);
-                if (meanFreq(pos - 0.8 * syncMs * spm, pos - 0.5 * spm) < thr &&
-                    meanFreq(pos + 0.3 * spm, pos + 2.5 * spm) > thr) {
+            const cur = track.mean(i - h, i + h);
+            if (prev < thr && cur >= thr) {
+                const pos = i - 1 + (thr - prev) / (cur - prev);
+                if (track.mean(pos - 0.8 * syncMs * spm, pos - 0.5 * spm) < thr &&
+                    track.mean(pos + 0.3 * spm, pos + 2.5 * spm) > thr) {
                     const d = Math.abs(pos - expected);
                     if (d < bestDist) { bestDist = d; best = pos; }
                 }
             }
+            prev = cur;
         }
         return best;
     }
@@ -1271,6 +1354,59 @@
         out[idx + 3] = 255;
     }
     
+    // Pixels d'un balayage : moyenne de la fréquence sur chaque pixel
+    function readPixels(track, start, durationMs, numPixels, off) {
+        const per = durationMs * track.rate / 1000 / numPixels;
+        const px = new Uint8Array(numPixels);
+        for (let i = 0; i < numPixels; i++) {
+            const f = track.mean(start + i * per, start + (i + 1) * per) - off;
+            px[i] = Math.max(0, Math.min(255, Math.round((f - FREQ.BLACK) / FREQ.RANGE * 255)));
+        }
+        return px;
+    }
+    
+    function robotLineMs(mode) {
+        return mode.syncMs + mode.porchMs + mode.scanMs +
+               (mode.separatorMs || 0) + (mode.chromaPorchMs || 0) + (mode.chromaMs || 0);
+    }
+    
+    // Lecture d'une ligne Robot à partir de sa fin de synchro ; k = échelle de
+    // temps mesurée / nominale
+    function robotReadLine(track, syncEnd, k, mode, line, off) {
+        const spm = track.rate / 1000;
+        const yStart = syncEnd + mode.porchMs * spm * k;
+        const r = { Y: readPixels(track, yStart, mode.scanMs * k, mode.width, off), C: null, isCr: false };
+        if (mode.chromaMs) {
+            const sepStart = yStart + mode.scanMs * spm * k;
+            const sepFreq = track.mean(sepStart + 0.5 * spm * k, sepStart + (mode.separatorMs - 0.5) * spm * k) - off;
+            // Séparateur 1500 Hz : R-Y ; 2300 Hz : B-Y ; ambigu : parité de ligne
+            r.isCr = (sepFreq < 1700) ? true : (sepFreq > 2100) ? false : (line % 2 === 0);
+            const cStart = sepStart + (mode.separatorMs + mode.chromaPorchMs) * spm * k;
+            r.C = readPixels(track, cStart, mode.chromaMs * k, mode.width, off);
+        }
+        return r;
+    }
+    
+    // Dessin d'une ligne Robot : R-Y et B-Y partagés par le couple (2n, 2n+1)
+    function robotDrawLine(lines, line, mode, data) {
+        const L = lines[line];
+        if (!L) return;
+        const neutral = robotDrawLine.neutral && robotDrawLine.neutral.length === mode.width
+            ? robotDrawLine.neutral : (robotDrawLine.neutral = new Uint8Array(mode.width).fill(128));
+        let cr = neutral, cb = neutral;
+        if (mode.chromaMs) {
+            for (const l of [line, line ^ 1]) {
+                const M = lines[l];
+                if (l >= mode.height || !M || !M.C) continue;
+                if (M.isCr) { if (cr === neutral) cr = M.C; }
+                else if (cb === neutral) cb = M.C;
+            }
+        }
+        for (let x = 0; x < mode.width; x++) {
+            yuvStudioToRgb(L.Y[x], cr[x], cb[x], data, (line * mode.width + x) * 4);
+        }
+    }
+    
     function decodeRobot(mode, imageStart) {
         const canvas = document.getElementById('canvas');
         canvas.width = mode.width;
@@ -1278,9 +1414,9 @@
         const ctx = canvas.getContext('2d');
         const imgData = ctx.createImageData(mode.width, mode.height);
         
-        const spm = sampleRate / 1000;
-        const lineMs = mode.syncMs + mode.porchMs + mode.scanMs +
-                       (mode.separatorMs || 0) + (mode.chromaPorchMs || 0) + (mode.chromaMs || 0);
+        const track = getFileTrack();
+        const spm = track.rate / 1000;
+        const lineMs = robotLineMs(mode);
         const lineSamples = lineMs * spm;
         
         log(`Robot decode: ${mode.height} lines, ${lineMs.toFixed(3)}ms/line nominal`);
@@ -1289,7 +1425,7 @@
         const points = [];
         let expected = imageStart + mode.syncMs * spm;
         for (let line = 0; line < mode.height; line++) {
-            const pos = findSyncEnd(expected, line === 0 ? 20 : 4, mode.syncMs);
+            const pos = findSyncEnd(track, expected, line === 0 ? 20 : 4, mode.syncMs, dopplerOffset);
             if (pos >= 0) points.push([line, pos]);
             expected = (pos >= 0 ? pos : expected) + lineSamples;
             updateProgress(50 + (line + 1) / mode.height * 25);
@@ -1306,42 +1442,14 @@
             a = imageStart + mode.syncMs * spm; b = lineSamples;
             log(`Syncs: ${points.length}/${mode.height} found, nominal clock used`);
         }
-        const k = b / lineSamples;   // échelle de temps mesurée / nominale
         
-        // 3. Lecture des lignes à partir de la fin de synchro
-        const Y = [], C = [], isCr = [];
+        // 3. Lecture et dessin
+        const lines = [];
         for (let line = 0; line < mode.height; line++) {
-            const syncEnd = a + b * line;
-            const yStart = syncEnd + mode.porchMs * spm * k;
-            Y[line] = decodeLine(yStart, mode.scanMs * k, mode.width);
-            
-            if (mode.chromaMs) {
-                const sepStart = yStart + mode.scanMs * spm * k;
-                const sepFreq = meanFreq(sepStart + 0.5 * spm * k, sepStart + (mode.separatorMs - 0.5) * spm * k) - dopplerOffset;
-                // Séparateur 1500 Hz : R-Y ; 2300 Hz : B-Y ; ambigu : parité de ligne
-                isCr[line] = (sepFreq < 1700) ? true : (sepFreq > 2100) ? false : (line % 2 === 0);
-                const cStart = sepStart + (mode.separatorMs + mode.chromaPorchMs) * spm * k;
-                C[line] = decodeLine(cStart, mode.chromaMs * k, mode.width);
-            }
+            lines[line] = robotReadLine(track, a + b * line, b / lineSamples, mode, line, dopplerOffset);
             updateProgress(75 + (line + 1) / mode.height * 25);
         }
-        
-        // 4. Couleur : R-Y et B-Y partagés par le couple de lignes (2n, 2n+1)
-        const neutral = new Uint8Array(mode.width).fill(128);
-        for (let line = 0; line < mode.height; line++) {
-            let cr = neutral, cb = neutral;
-            if (mode.chromaMs) {
-                const mate = line ^ 1;
-                for (const l of [line, mate]) {
-                    if (l >= mode.height || !C[l]) continue;
-                    if (isCr[l]) { if (cr === neutral) cr = C[l]; }
-                    else if (cb === neutral) cb = C[l];
-                }
-            }
-            for (let x = 0; x < mode.width; x++) {
-                yuvStudioToRgb(Y[line][x], cr[x], cb[x], imgData.data, (line * mode.width + x) * 4);
-            }
-        }
+        for (let line = 0; line < mode.height; line++) robotDrawLine(lines, line, mode, imgData.data);
         
         ctx.putImageData(imgData, 0, 0);
         log('Robot decode complete');
@@ -1729,49 +1837,114 @@
     }
     
     // ==========================================================================
-    // LIVE AUDIO GLOBALS
+    // AUDIO EN DIRECT (MICRO)
+    // Le micro est pris tel qu'il est : fréquence d'échantillonnage et voies
+    // fournies par le navigateur, sans contrainte ; seuls les traitements vocaux
+    // (annulation d'écho, réduction de bruit, gain automatique) sont coupés.
+    // La chaîne de décodage (VIS, synchro, lecture des lignes) est celle du
+    // mode fichier, appliquée au fil de l'eau sur une piste de fréquence.
     // ==========================================================================
     
-    const LIVE_BUFFER_SECONDS = 60;
-    const LIVE_BUFFER_SIZE = sampleRate * LIVE_BUFFER_SECONDS;
+    // Démodulateur FM en flux : mélange à 1900 Hz, passe-bas FIR (fenêtre de
+    // Hamming, coupure 1950 Hz), fréquence = dérivée de la phase. Retard
+    // constant de (N-1)/2 échantillons, identique pour tous les repères.
+    function StreamDemod(rate) {
+        this.rate = rate;
+        let n = Math.round(3.3 * rate / 2100) | 1;
+        const m = (n - 1) / 2;
+        const fc = 1950 / rate;
+        this.h = new Float64Array(n);
+        let sum = 0;
+        for (let i = 0; i < n; i++) {
+            const t = i - m;
+            const sinc = t === 0 ? 2 * fc : Math.sin(2 * Math.PI * fc * t) / (Math.PI * t);
+            this.h[i] = sinc * (0.54 - 0.46 * Math.cos(2 * Math.PI * i / (n - 1)));
+            sum += this.h[i];
+        }
+        for (let i = 0; i < n; i++) this.h[i] /= sum;
+        this.n = n;
+        this.bi = new Float64Array(2 * n);   // tampons doublés : lecture contiguë
+        this.bq = new Float64Array(2 * n);
+        this.pos = 0;
+        this.w = 2 * Math.PI * 1900 / rate;
+        this.cw = Math.cos(this.w); this.sw = Math.sin(this.w);
+        this.oc = 1; this.os = 0;            // oscillateur local (phaseur)
+        this.count = 0;
+        this.pi = 1; this.pq = 0;
+    }
+    
+    StreamDemod.prototype.process = function (input) {
+        const out = new Float32Array(input.length);
+        const n = this.n, h = this.h, bi = this.bi, bq = this.bq;
+        const k = this.rate / (2 * Math.PI);
+        for (let j = 0; j < input.length; j++) {
+            // Mélange x · e^(-jwt)
+            const x = input[j];
+            const p = this.pos;
+            bi[p] = bi[p + n] = x * this.oc;
+            bq[p] = bq[p + n] = -x * this.os;
+            this.pos = (p + 1) % n;
+            const c = this.oc * this.cw - this.os * this.sw;
+            this.os = this.os * this.cw + this.oc * this.sw;
+            this.oc = c;
+            if (++this.count === 4096) {        // renormalisation du phaseur
+                const g = 1 / Math.hypot(this.oc, this.os);
+                this.oc *= g; this.os *= g; this.count = 0;
+            }
+            // Filtre
+            let zi = 0, zq = 0;
+            const base = this.pos;
+            for (let t = 0; t < n; t++) { zi += h[t] * bi[base + t]; zq += h[t] * bq[base + t]; }
+            // Fréquence instantanée
+            const re = zi * this.pi + zq * this.pq;
+            const im = zq * this.pi - zi * this.pq;
+            this.pi = zi; this.pq = zq;
+            let f = 1900 + Math.atan2(im, re) * k;
+            out[j] = f < 800 ? 800 : f > 3000 ? 3000 : f;
+        }
+        return out;
+    };
+    
+    const LIVE_IDLE_SECONDS = 60;        // mémoire gardée en écoute
+    const LIVE_MAX_MISSES = 20;          // synchros manquées de suite : fin d'image
+    
+    const WORKLET_SOURCE = `
+        class SstvTap extends AudioWorkletProcessor {
+            constructor() { super(); this.buf = new Float32Array(2048); this.n = 0; }
+            process(inputs) {
+                const ch = inputs[0] && inputs[0][0];
+                if (ch) {
+                    for (let i = 0; i < ch.length; i++) {
+                        this.buf[this.n++] = ch[i];
+                        if (this.n === this.buf.length) {
+                            this.port.postMessage(this.buf);
+                            this.buf = new Float32Array(2048);
+                            this.n = 0;
+                        }
+                    }
+                }
+                return true;
+            }
+        }
+        registerProcessor('sstv-tap', SstvTap);`;
     
     let liveAudioContext = null;
     let liveMediaStream = null;
     let liveAnalyserNode = null;
+    let liveTapNode = null;
+    let liveWakeLock = null;
     
-    const liveAudioBuffer = new Float32Array(LIVE_BUFFER_SIZE);
-    const liveFreqBuffer = new Float32Array(LIVE_BUFFER_SIZE);
-    let liveWriteIndex = 0;
-    let liveTotalSamples = 0;
-    
-    // Demodulator state
-    let liveLastSample = 0;
-    let liveLastCrossing = 0;
-    let liveInstantFreq = 1500;
-    let liveFreqHistory = new Float32Array(5);
-    let liveFreqHistoryIdx = 0;
-    
-    // State machine
+    let liveRate = 0;
+    let liveDemod = null;
+    let liveTrack = null;
     let liveState = 'idle';
-    let liveCurrentMode = null;
     let liveDopplerOffset = 0;
+    let liveVisFrom = 0;
+    let liveRx = null;        // image en cours de réception
+    let liveLevel = 0;
     
-    // VIS detection
-    let liveVisState = 'searching';
-    let liveLeaderStartIdx = -1;
-    let liveLeaderCount = 0;
-    let liveVisBits = [];
-    
-    // Image decoding
-    let liveImageStartIdx = 0;
-    let liveCurrentLine = 0;
-    let liveChromaU = [], liveChromaV = [];
-    
-    // Canvas
     let liveMainCtx = null;
     let liveImageData = null;
-    
-    let liveProcessInterval = null;
     let liveVisualInterval = null;
     
     // ==========================================================================
@@ -1785,66 +1958,96 @@
     document.getElementById('liveDopplerOffset').addEventListener('change', e => {
         liveDopplerOffset = parseFloat(e.target.value) || 0;
     });
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible' && liveState !== 'idle') requestWakeLock();
+    });
     
     // ==========================================================================
-    // LIVE AUDIO CAPTURE
+    // CAPTURE
     // ==========================================================================
+    
+    async function requestWakeLock() {
+        try {
+            if (navigator.wakeLock && !liveWakeLock) {
+                liveWakeLock = await navigator.wakeLock.request('screen');
+                liveWakeLock.addEventListener('release', () => { liveWakeLock = null; });
+            }
+        } catch (err) {
+            liveLog('Maintien de l\'écran refusé : ' + err.message);
+        }
+    }
+    
+    // Préparation de la chaîne de décodage pour une fréquence d'échantillonnage
+    function liveInit(rate) {
+        liveRate = rate;
+        liveDemod = new StreamDemod(rate);
+        liveTrack = new FreqTrack(rate, rate * 20);
+        liveVisFrom = 0;
+        liveRx = null;
+        liveDopplerOffset = parseFloat(document.getElementById('liveDopplerOffset').value) || 0;
+        setLiveState('listening');
+    }
     
     async function startLiveAudio() {
         try {
             liveLog('Demande de permission audio...');
             
-            liveAudioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: sampleRate });
-            
             liveMediaStream = await navigator.mediaDevices.getUserMedia({
                 audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
             });
+            liveAudioContext = new (window.AudioContext || window.webkitAudioContext)();
+            await liveAudioContext.resume();
             
             const track = liveMediaStream.getAudioTracks()[0];
-            document.getElementById('liveSourceName').textContent = track.label || 'Microphone par défaut';
-            liveLog('Source: ' + (track.label || 'default'));
+            const st = track.getSettings ? track.getSettings() : {};
+            const rate = liveAudioContext.sampleRate;
+            const desc = `${track.label || 'Micro par défaut'} — ${rate} Hz` +
+                         (st.channelCount ? `, ${st.channelCount} voie(s)` : '');
+            document.getElementById('liveSourceName').textContent = desc;
+            liveLog('Source : ' + desc);
+            liveLog(`Réglages micro : ${JSON.stringify(st)}`);
             
             const source = liveAudioContext.createMediaStreamSource(liveMediaStream);
-            
             liveAnalyserNode = liveAudioContext.createAnalyser();
             liveAnalyserNode.fftSize = 2048;
-            
-            const scriptNode = liveAudioContext.createScriptProcessor(1024, 1, 1);
-            scriptNode.onaudioprocess = handleLiveAudioProcess;
-            
             source.connect(liveAnalyserNode);
-            source.connect(scriptNode);
-            scriptNode.connect(liveAudioContext.destination);
             
-            // Reset
-            liveWriteIndex = 0;
-            liveTotalSamples = 0;
-            liveLastSample = 0;
-            liveLastCrossing = 0;
-            liveInstantFreq = 1500;
-            resetLiveDecoder();
+            liveInit(rate);
+            
+            if (liveAudioContext.audioWorklet) {
+                const url = URL.createObjectURL(new Blob([WORKLET_SOURCE], { type: 'application/javascript' }));
+                await liveAudioContext.audioWorklet.addModule(url);
+                URL.revokeObjectURL(url);
+                liveTapNode = new AudioWorkletNode(liveAudioContext, 'sstv-tap');
+                liveTapNode.port.onmessage = e => liveFeed(e.data);
+            } else {
+                liveTapNode = liveAudioContext.createScriptProcessor(4096, 1, 1);
+                liveTapNode.onaudioprocess = e => liveFeed(new Float32Array(e.inputBuffer.getChannelData(0)));
+            }
+            source.connect(liveTapNode);
+            liveTapNode.connect(liveAudioContext.destination);   // sortie muette
+            
+            requestWakeLock();
             
             document.getElementById('startLiveBtn').disabled = true;
             document.getElementById('stopLiveBtn').disabled = false;
-            
-            setLiveState('listening');
-            liveLog('Capture audio démarrée - en attente du signal VIS...');
-            
-            liveProcessInterval = setInterval(processLiveStateMachine, 50);
+            liveLog('Capture démarrée - en attente du signal...');
             liveVisualInterval = setInterval(updateLiveVisuals, 100);
             
         } catch (err) {
             liveLog('ERREUR: ' + err.message);
             console.error(err);
-            if (liveAudioContext) { liveAudioContext.close(); liveAudioContext = null; }
+            stopLiveAudio();
         }
     }
     
     function stopLiveAudio() {
-        if (liveProcessInterval) { clearInterval(liveProcessInterval); liveProcessInterval = null; }
         if (liveVisualInterval) { clearInterval(liveVisualInterval); liveVisualInterval = null; }
+        if (liveTapNode) { try { liveTapNode.disconnect(); } catch (e) {} liveTapNode = null; }
         if (liveMediaStream) { liveMediaStream.getTracks().forEach(t => t.stop()); liveMediaStream = null; }
         if (liveAudioContext) { liveAudioContext.close(); liveAudioContext = null; }
+        if (liveWakeLock) { liveWakeLock.release(); liveWakeLock = null; }
+        if (liveRx) liveFinishImage('arrêt');
         
         document.getElementById('startLiveBtn').disabled = false;
         document.getElementById('stopLiveBtn').disabled = true;
@@ -1856,410 +2059,229 @@
         liveLog('Capture audio arrêtée');
     }
     
-    function handleLiveAudioProcess(event) {
-        const input = event.inputBuffer.getChannelData(0);
+    // Bloc d'échantillons reçu du micro
+    function liveFeed(samples) {
+        if (liveState === 'idle' || !liveDemod) return;
+        let e = 0;
+        for (let i = 0; i < samples.length; i++) e += samples[i] * samples[i];
+        liveLevel = Math.sqrt(e / samples.length);
+        liveTrack.push(liveDemod.process(samples));
         
-        for (let i = 0; i < input.length; i++) {
-            const sample = input[i];
-            const globalIdx = liveTotalSamples + i;
-            
-            liveAudioBuffer[liveWriteIndex] = sample;
-            
-            // Zero-crossing with interpolation
-            if ((liveLastSample < 0 && sample >= 0) || (liveLastSample >= 0 && sample < 0)) {
-                if (liveLastCrossing > 0) {
-                    const frac = Math.abs(liveLastSample) / (Math.abs(liveLastSample) + Math.abs(sample));
-                    const crossing = globalIdx - 1 + frac;
-                    const halfPeriod = crossing - liveLastCrossing;
-                    const freq = sampleRate / (halfPeriod * 2);
-                    
-                    if (freq >= 900 && freq <= 2600) {
-                        // Median filter
-                        liveFreqHistory[liveFreqHistoryIdx] = freq;
-                        liveFreqHistoryIdx = (liveFreqHistoryIdx + 1) % 5;
-                        const sorted = [...liveFreqHistory].sort((a,b) => a-b);
-                        const median = sorted[2];
-                        
-                        // Smoothing
-                        liveInstantFreq = liveInstantFreq * 0.6 + median * 0.4;
-                    }
-                    liveLastCrossing = crossing;
-                } else {
-                    liveLastCrossing = globalIdx;
-                }
-            }
-            liveLastSample = sample;
-            
-            liveFreqBuffer[liveWriteIndex] = liveInstantFreq;
-            liveWriteIndex = (liveWriteIndex + 1) % LIVE_BUFFER_SIZE;
-        }
-        
-        liveTotalSamples += input.length;
-        document.getElementById('liveFreqDisplay').textContent = Math.round(liveInstantFreq) + ' Hz';
-    }
-    
-    function getLiveFreqAt(idx) {
-        const bufStart = liveTotalSamples - LIVE_BUFFER_SIZE;
-        if (idx < bufStart) return 1500;
-        return liveFreqBuffer[idx % LIVE_BUFFER_SIZE] || 1500;
-    }
-    
-    function getLiveAvgFreq(startIdx, count) {
-        let sum = 0, n = 0;
-        for (let i = 0; i < count; i++) {
-            const f = getLiveFreqAt(startIdx + i);
-            if (f > 0) { sum += f; n++; }
-        }
-        return n > 0 ? sum / n : 1500;
+        if (liveState === 'listening') liveListen();
+        if (liveState === 'receiving') liveReceive();
     }
     
     // ==========================================================================
-    // LIVE STATE MACHINE
+    // ÉCOUTE : VIS, ou synchros régulières si un mode est forcé
     // ==========================================================================
     
-    let liveLastDebugLog = 0;
-    let liveLastScanIdx = 0;
-    
-    function processLiveStateMachine() {
-        if (liveState === 'idle') return;
-        if (liveState === 'listening') detectLiveSignal();
-        else if (liveState === 'receiving') decodeLiveLines();
-    }
-    
-    function detectLiveSignal() {
-        const samplesPerMs = sampleRate / 1000;
-        const currentIdx = liveTotalSamples;
-        if (currentIdx < sampleRate) return; // Attendre 1 seconde de buffer
+    function liveListen() {
+        const spm = liveRate / 1000;
+        const forced = document.getElementById('liveForceMode').value;
         
-        const forcedMode = document.getElementById('liveForceMode').value;
-        const freq = liveInstantFreq - liveDopplerOffset;
-        
-        // Debug log toutes les 2 secondes
-        const now = Date.now();
-        if (now - liveLastDebugLog > 2000) {
-            liveLog('Freq: ' + Math.round(freq) + 'Hz | Mode: ' + forcedMode);
-            liveLastDebugLog = now;
+        // Mémoire bornée en écoute
+        if (liveTrack.len > LIVE_IDLE_SECONDS * liveRate) {
+            const shift = liveTrack.keepTail(5);
+            liveVisFrom = Math.max(0, liveVisFrom - shift);
         }
         
-        // MODE FORCÉ : scanner le buffer pour trouver un sync valide
-        if (forcedMode !== 'auto') {
-            // Scanner depuis la dernière position vérifiée
-            const scanStart = Math.max(liveLastScanIdx, currentIdx - Math.floor(500 * samplesPerMs));
-            const scanEnd = currentIdx - Math.floor(50 * samplesPerMs); // Garder 50ms de marge
-            
-            if (scanEnd <= scanStart) return;
-            
-            const minSyncSamples = Math.floor(5 * samplesPerMs);  // 5ms min
-            const maxSyncSamples = Math.floor(15 * samplesPerMs); // 15ms max
-            
-            let inSync = false;
-            let syncStart = 0;
-            
-            // Scanner sample par sample (par pas de 1ms pour la perf)
-            const step = Math.floor(samplesPerMs);
-            
-            for (let i = scanStart; i < scanEnd; i += step) {
-                const f = getLiveFreqAt(i);
-                
-                if (!inSync) {
-                    // Chercher début de sync (1200Hz ± 100Hz)
-                    if (f > 1100 && f < 1300) {
-                        inSync = true;
-                        syncStart = i;
-                    }
-                } else {
-                    // Dans le sync - chercher la fin
-                    if (f < 1050 || f > 1400) {
-                        // Sync terminé - vérifier durée
-                        const syncDuration = i - syncStart;
-                        
-                        if (syncDuration >= minSyncSamples && syncDuration <= maxSyncSamples) {
-                            // SYNC VALIDE TROUVÉ!
-                            const durationMs = syncDuration / samplesPerMs;
-                            liveLog('=== SYNC TROUVÉ! ===');
-                            liveLog('Durée: ' + durationMs.toFixed(1) + 'ms');
-                            liveLog('Position: ' + (syncStart / samplesPerMs).toFixed(0) + 'ms');
-                            liveLog('Mode: ' + forcedMode);
-                            
-                            liveCurrentMode = forcedMode;
-                            document.getElementById('liveStatMode').textContent = SSTV_MODES[liveCurrentMode].name;
-                            
-                            // Image starts at this sync
-                            liveImageStartIdx = syncStart;
-                            liveCurrentLine = 0;
-                            liveChromaU = []; liveChromaV = [];
-                            prepareLiveCanvas();
-                            setLiveState('receiving');
-                            liveLog('Décodage en cours...');
-                            return;
-                        }
-                        // Sync trop court ou trop long, continuer
-                        inSync = false;
-                    }
-                }
-            }
-            
-            // Mettre à jour la position de scan
-            liveLastScanIdx = scanEnd;
+        const to = liveTrack.len - Math.ceil(320 * spm);
+        if (to <= liveVisFrom) return;
+        const vis = findVIS(liveTrack, liveVisFrom, to, liveDopplerOffset, liveLog);
+        
+        if (vis) {
+            liveVisFrom = vis.imageStart;
+            let modeName = forced !== 'auto' ? forced : VIS_TO_MODE[vis.visCode];
+            if (!modeName) { liveLog('Code VIS inconnu, retour écoute'); return; }
+            liveStartImage(modeName, vis.imageStart, true);
             return;
         }
         
-        // MODE AUTO : attendre le VIS (1900Hz leader)
-        const windowMs = 20;
-        const windowSamples = Math.floor(windowMs * samplesPerMs);
-        const checkIdx = currentIdx - windowSamples;
-        if (checkIdx < 0) return;
+        if (forced !== 'auto' && SSTV_MODES[forced].lineSequence === 'robot') {
+            const start = findRobotStart(liveTrack, SSTV_MODES[forced], liveVisFrom, to);
+            if (start >= 0) {
+                liveVisFrom = start;
+                liveStartImage(forced, start, false);
+                return;
+            }
+        }
+        liveVisFrom = to;
+    }
+    
+    // Sans VIS : trois fins de synchro espacées d'une ligne
+    function findRobotStart(track, mode, from, to) {
+        const spm = track.rate / 1000;
+        const T = robotLineMs(mode) * spm;
+        const last = Math.min(to, track.len - 2 * T - 5 * spm);
+        for (let e = Math.max(from, 10 * spm); e < last; e += 3 * spm) {
+            const p0 = findSyncEnd(track, e, 1.5, mode.syncMs, liveDopplerOffset);
+            if (p0 < 0) continue;
+            const p1 = findSyncEnd(track, p0 + T, 2, mode.syncMs, liveDopplerOffset);
+            if (p1 < 0) continue;
+            const p2 = findSyncEnd(track, p1 + T, 2, mode.syncMs, liveDopplerOffset);
+            if (p2 < 0) continue;
+            return Math.round(p0 - mode.syncMs * spm);
+        }
+        return -1;
+    }
+    
+    function liveStartImage(modeName, start, fromVIS) {
+        const mode = SSTV_MODES[modeName];
+        const spm = liveRate / 1000;
+        liveRx = {
+            modeName, mode, start, fromVIS,
+            line: 0, misses: 0, points: [], lines: [],
+            expected: start + mode.syncMs * spm
+        };
+        document.getElementById('liveStatMode').textContent = mode.name;
+        liveLog(`${fromVIS ? 'VIS' : 'Synchro'} : ${mode.name}, début à ${(start / liveRate).toFixed(3)}s`);
+        prepareLiveCanvas(mode);
+        setLiveState('receiving');
+    }
+    
+    // ==========================================================================
+    // RÉCEPTION
+    // ==========================================================================
+    
+    function liveReceive() {
+        const rx = liveRx;
+        if (!rx) return;
+        if (rx.mode.lineSequence === 'robot') liveReceiveRobot(rx);
+        else liveReceiveFixed(rx);
+    }
+    
+    // Robot : fin de synchro suivie ligne par ligne, horloge mesurée en continu
+    function liveReceiveRobot(rx) {
+        const mode = rx.mode;
+        const spm = liveRate / 1000;
+        const T = robotLineMs(mode) * spm;
         
-        const avgFreq = getLiveAvgFreq(checkIdx, windowSamples) - liveDopplerOffset;
-        
-        if (liveVisState === 'searching') {
-            if (avgFreq > 1850 && avgFreq < 1950) {
-                liveLeaderCount++;
-                if (liveLeaderCount > 10) {
-                    liveLog('VIS leader détecté!');
-                    liveVisState = 'leader_found';
-                    liveLeaderStartIdx = checkIdx - (liveLeaderCount * windowSamples);
-                }
+        while (rx.line < mode.height) {
+            // Données nécessaires : fin de la ligne + fenêtre de recherche
+            if (liveTrack.len < rx.expected + T + 6 * spm) return;
+            
+            const line = rx.line;
+            const pos = findSyncEnd(liveTrack, rx.expected, line === 0 ? 20 : 4, mode.syncMs, liveDopplerOffset);
+            if (pos >= 0) { rx.points.push([line, pos]); rx.misses = 0; }
+            else rx.misses++;
+            
+            let syncEnd, k = 1, next;
+            if (rx.points.length >= 8) {
+                const fit = fitLine(rx.points, spm);
+                syncEnd = fit.a + fit.b * line;
+                k = fit.b / T;
+                next = fit.a + fit.b * (line + 1);
             } else {
-                liveLeaderCount = Math.max(0, liveLeaderCount - 1);
-            }
-        } else if (liveVisState === 'leader_found') {
-            const elapsed = checkIdx - liveLeaderStartIdx;
-            if (elapsed / samplesPerMs > 600 && liveVisBits.length < 8) {
-                liveVisState = 'reading_bits';
-                liveVisBits = [];
-                liveLog('Lecture des bits VIS...');
-            }
-        } else if (liveVisState === 'reading_bits') {
-            const bitDur = 30 * samplesPerMs;
-            const bitsStart = liveLeaderStartIdx + Math.floor(620 * samplesPerMs);
-            const elapsed = checkIdx - bitsStart;
-            const currentBit = Math.floor(elapsed / bitDur);
-            
-            if (currentBit >= 0 && currentBit < 8 && liveVisBits.length === currentBit) {
-                const bitCenter = bitsStart + (currentBit * bitDur) + bitDur / 2;
-                const bitFreq = getLiveAvgFreq(bitCenter, 10 * samplesPerMs) - liveDopplerOffset;
-                const bitVal = bitFreq < 1200 ? 1 : 0;
-                liveVisBits.push(bitVal);
-                liveLog('  Bit ' + currentBit + ': ' + Math.round(bitFreq) + 'Hz -> ' + bitVal);
+                syncEnd = pos >= 0 ? pos : rx.expected;
+                next = syncEnd + T;
             }
             
-            if (liveVisBits.length >= 8) {
-                let visCode = 0;
-                for (let i = 0; i < 8; i++) if (liveVisBits[i]) visCode |= (1 << i);
-                liveLog('VIS code: 0x' + visCode.toString(16).toUpperCase() + ' (' + visCode + ')');
-                
-                const forced = document.getElementById('liveForceMode').value;
-                if (forced !== 'auto') {
-                    liveCurrentMode = forced;
-                } else if (VIS_TO_MODE[visCode]) {
-                    liveCurrentMode = VIS_TO_MODE[visCode];
-                } else {
-                    liveLog('Code VIS inconnu, retour écoute');
-                    resetLiveVIS();
-                    return;
-                }
-                
-                liveLog('Mode: ' + SSTV_MODES[liveCurrentMode].name);
-                document.getElementById('liveStatMode').textContent = SSTV_MODES[liveCurrentMode].name;
-                
-                // Calculate theoretical start
-                const theoreticalStart = bitsStart + Math.floor(10 * bitDur);
-                
-                // Search for first real sync pulse after theoretical start
-                liveLog('Recherche du premier sync de ligne...');
-                const searchStart = theoreticalStart;
-                const searchEnd = Math.min(theoreticalStart + Math.floor(500 * samplesPerMs), liveTotalSamples);
-                const minSyncDur = Math.floor(4 * samplesPerMs);
-                const maxSyncDur = Math.floor(15 * samplesPerMs);
-                
-                let inSync = false;
-                let syncStartIdx = 0;
-                let firstSyncFound = -1;
-                
-                for (let i = searchStart; i < searchEnd; i += Math.floor(samplesPerMs)) {
-                    const freq = getLiveFreqAt(i);
-                    
-                    if (freq > 1100 + liveDopplerOffset && freq < 1300 + liveDopplerOffset) {
-                        if (!inSync) {
-                            syncStartIdx = i;
-                            inSync = true;
-                        }
-                    } else {
-                        if (inSync) {
-                            const duration = i - syncStartIdx;
-                            if (duration >= minSyncDur && duration <= maxSyncDur) {
-                                firstSyncFound = syncStartIdx;
-                                liveLog('Premier sync trouvé à ' + (syncStartIdx / sampleRate * 1000).toFixed(2) + 'ms');
-                                break;
-                            }
-                            inSync = false;
-                        }
-                    }
-                }
-                
-                if (firstSyncFound > 0) {
-                    liveImageStartIdx = firstSyncFound;
-                } else {
-                    liveImageStartIdx = theoreticalStart;
-                    liveLog('Sync non trouvé, utilisation du start théorique');
-                }
-                
-                liveCurrentLine = 0;
-                liveChromaU = []; liveChromaV = [];
-                prepareLiveCanvas();
-                setLiveState('receiving');
-                liveLog('Réception de l\'image...');
+            rx.lines[line] = robotReadLine(liveTrack, syncEnd, k, mode, line, liveDopplerOffset);
+            robotDrawLine(rx.lines, line, mode, liveImageData.data);
+            if (line & 1) robotDrawLine(rx.lines, line - 1, mode, liveImageData.data);
+            
+            rx.expected = next;
+            rx.line++;
+            updateLiveProgress(rx.line, mode.height, mode.height);
+            
+            if (rx.misses >= LIVE_MAX_MISSES) { liveFinishImage('signal perdu'); return; }
+        }
+        liveMainCtx.putImageData(liveImageData, 0, 0);
+        liveFinishImage('image complète');
+    }
+    
+    // Autres modes : durée de ligne nominale depuis le début d'image
+    function liveReceiveFixed(rx) {
+        const mode = rx.mode;
+        const spm = liveRate / 1000;
+        const lineMs = getLiveLineDuration(mode);
+        const total = mode.lineSequence === 'pd' ? Math.floor(mode.height / 2) : mode.height;
+        
+        while (rx.line < total) {
+            const lineStart = rx.start + rx.line * lineMs * spm;
+            if (liveTrack.len < lineStart + lineMs * spm) return;
+            decodeLiveOneLine(rx.line, mode, lineStart);
+            rx.line++;
+            updateLiveProgress(rx.line, total, mode.height);
+        }
+        liveFinishImage('image complète');
+    }
+    
+    // Fin d'image : Robot redessiné avec l'horloge mesurée sur toute l'image
+    function liveFinishImage(reason) {
+        const rx = liveRx;
+        liveRx = null;
+        if (!rx) return;
+        const mode = rx.mode;
+        
+        if (mode.lineSequence === 'robot' && rx.points.length >= 8) {
+            const spm = liveRate / 1000;
+            const T = robotLineMs(mode) * spm;
+            const fit = fitLine(rx.points, spm);
+            const lines = [];
+            for (let line = 0; line < rx.line; line++) {
+                lines[line] = robotReadLine(liveTrack, fit.a + fit.b * line, fit.b / T, mode, line, liveDopplerOffset);
             }
+            for (let line = 0; line < rx.line; line++) robotDrawLine(lines, line, mode, liveImageData.data);
+            liveLog(`Synchros : ${rx.points.length}/${rx.line}, période mesurée ${(fit.b / spm).toFixed(4)} ms (${((fit.b / T - 1) * 1e6).toFixed(0)} ppm)`);
+        }
+        liveMainCtx.putImageData(liveImageData, 0, 0);
+        liveLog(`Fin d'image (${reason}) : ${rx.line} lignes`);
+        document.getElementById('liveSaveBtn').disabled = false;
+        
+        if (liveState !== 'idle') {
+            // Écoute reprise après la dernière ligne reçue
+            liveVisFrom = Math.max(liveVisFrom, Math.floor(Math.min(rx.expected, liveTrack.len)));
+            setLiveState('listening');
         }
     }
     
-    function decodeLiveLines() {
-        if (!liveCurrentMode) return;
-        const mode = SSTV_MODES[liveCurrentMode];
-        const samplesPerMs = sampleRate / 1000;
-        const lineDur = getLiveLineDuration(mode);
-        const samplesPerLine = Math.floor(lineDur * samplesPerMs);
-        const totalLines = mode.lineSequence === 'pd' ? Math.floor(mode.height / 2) : mode.height;
-        
-        const available = liveTotalSamples - liveImageStartIdx;
-        const availableLines = Math.floor(available / samplesPerLine);
-        
-        while (liveCurrentLine < availableLines && liveCurrentLine < totalLines) {
-            const lineStart = liveImageStartIdx + liveCurrentLine * samplesPerLine;
-            const bufStart = liveTotalSamples - LIVE_BUFFER_SIZE;
-            if (lineStart < bufStart) { liveCurrentLine++; continue; }
-            
-            decodeLiveOneLine(liveCurrentLine, mode, lineStart);
-            liveCurrentLine++;
-            
-            const progress = (liveCurrentLine / totalLines) * 100;
-            document.getElementById('liveProgressFill').style.width = progress + '%';
-            document.getElementById('liveStatLine').textContent = 
-                mode.lineSequence === 'pd' ? (liveCurrentLine*2) + '/' + mode.height : liveCurrentLine + '/' + mode.height;
-        }
-        
-        if (liveCurrentLine >= totalLines) {
-            liveLog('Image complète!');
-            document.getElementById('liveSaveBtn').disabled = false;
-            setLiveState('listening');
-            resetLiveVIS();
-        }
+    function updateLiveProgress(done, total, height) {
+        document.getElementById('liveProgressFill').style.width = (done / total * 100) + '%';
+        const shown = total === height ? done : Math.min(height, done * 2);
+        document.getElementById('liveStatLine').textContent = shown + '/' + height;
+        if (liveMainCtx && (done % 4 === 0 || done === total)) liveMainCtx.putImageData(liveImageData, 0, 0);
     }
     
     function getLiveLineDuration(mode) {
         switch (mode.lineSequence) {
             case 'pd': return mode.syncMs + mode.porchMs + mode.scanMs * 4;
-            case 'robot': return mode.syncMs + mode.porchMs + mode.scanMs + (mode.separatorMs||0) + (mode.chromaPorchMs||0) + (mode.chromaMs||0);
+            case 'robot': return robotLineMs(mode);
             case 'martin': return mode.syncMs + mode.porchMs + mode.scanMs * 3 + mode.separatorMs * 3;
             case 'scottie': return mode.separatorMs * 2 + mode.scanMs * 3 + mode.syncMs + mode.porchMs;
         }
         return 100;
     }
     
-    function decodeLivePixels(startIdx, durationMs, numPixels) {
-        const samplesPerMs = sampleRate / 1000;
-        const total = Math.floor(durationMs * samplesPerMs);
-        const perPixel = total / numPixels;
-        const pixels = new Uint8Array(numPixels);
-        
-        for (let px = 0; px < numPixels; px++) {
-            const pxStart = Math.floor(startIdx + px * perPixel);
-            const pxEnd = Math.floor(startIdx + (px + 1) * perPixel);
-            
-            let sum = 0, n = 0;
-            for (let i = pxStart; i < pxEnd; i++) {
-                sum += getLiveFreqAt(i); n++;
-            }
-            
-            const avg = n > 0 ? sum / n : 1500;
-            const norm = (avg - liveDopplerOffset - FREQ.BLACK) / FREQ.RANGE;
-            pixels[px] = Math.max(0, Math.min(255, Math.round(norm * 255)));
-        }
-        return pixels;
-    }
-    
     function decodeLiveOneLine(lineNum, mode, lineStart) {
-        const samplesPerMs = sampleRate / 1000;
+        const spm = liveRate / 1000;
+        const off = liveDopplerOffset;
+        const px = (start, ms) => readPixels(liveTrack, start, ms, mode.width, off);
         
         switch (mode.lineSequence) {
             case 'pd': {
-                const sync = Math.floor(mode.syncMs * samplesPerMs);
-                const porch = Math.floor(mode.porchMs * samplesPerMs);
-                const scan = Math.floor(mode.scanMs * samplesPerMs);
-                
-                const y0 = lineStart + sync + porch;
-                const ry = y0 + scan;
-                const by = ry + scan;
-                const y1 = by + scan;
-                
-                const Y0 = decodeLivePixels(y0, mode.scanMs, mode.width);
-                const RY = decodeLivePixels(ry, mode.scanMs, mode.width);
-                const BY = decodeLivePixels(by, mode.scanMs, mode.width);
-                const Y1 = decodeLivePixels(y1, mode.scanMs, mode.width);
-                
+                const y0 = lineStart + (mode.syncMs + mode.porchMs) * spm;
+                const ry = y0 + mode.scanMs * spm;
+                const by = ry + mode.scanMs * spm;
+                const y1 = by + mode.scanMs * spm;
+                const Y0 = px(y0, mode.scanMs), RY = px(ry, mode.scanMs);
+                const BY = px(by, mode.scanMs), Y1 = px(y1, mode.scanMs);
                 drawLiveLineYUV(lineNum * 2, Y0, BY, RY, mode.width);
                 if (lineNum * 2 + 1 < mode.height) drawLiveLineYUV(lineNum * 2 + 1, Y1, BY, RY, mode.width);
                 break;
             }
-            case 'robot': {
-                const sync = Math.floor(mode.syncMs * samplesPerMs);
-                const porch = Math.floor(mode.porchMs * samplesPerMs);
-                const scan = Math.floor(mode.scanMs * samplesPerMs);
-                const sep = Math.floor((mode.separatorMs||0) * samplesPerMs);
-                const cporch = Math.floor((mode.chromaPorchMs||0) * samplesPerMs);
-                
-                const yStart = lineStart + sync + porch;
-                const Y = decodeLivePixels(yStart, mode.scanMs, mode.width);
-                
-                let U, V;
-                if (mode.chromaMs) {
-                    const cStart = yStart + scan + sep + cporch;
-                    const C = decodeLivePixels(cStart, mode.chromaMs, mode.width);
-                    if (lineNum % 2 === 0) {
-                        V = C; liveChromaV[lineNum] = V;
-                        U = liveChromaU[lineNum-1] || new Uint8Array(mode.width).fill(128);
-                    } else {
-                        U = C; liveChromaU[lineNum] = U;
-                        V = liveChromaV[lineNum-1] || new Uint8Array(mode.width).fill(128);
-                    }
-                } else {
-                    U = new Uint8Array(mode.width).fill(128);
-                    V = new Uint8Array(mode.width).fill(128);
-                }
-                drawLiveLineYUV(lineNum, Y, U, V, mode.width);
-                break;
-            }
             case 'martin': {
-                const sync = Math.floor(mode.syncMs * samplesPerMs);
-                const porch = Math.floor(mode.porchMs * samplesPerMs);
-                const scan = Math.floor(mode.scanMs * samplesPerMs);
-                const sep = Math.floor(mode.separatorMs * samplesPerMs);
-                
-                const g = lineStart + sync + porch;
-                const b = g + scan + sep;
-                const r = b + scan + sep;
-                
-                const G = decodeLivePixels(g, mode.scanMs, mode.width);
-                const B = decodeLivePixels(b, mode.scanMs, mode.width);
-                const R = decodeLivePixels(r, mode.scanMs, mode.width);
-                drawLiveLineRGB(lineNum, R, G, B, mode.width);
+                const g = lineStart + (mode.syncMs + mode.porchMs) * spm;
+                const b = g + (mode.scanMs + mode.separatorMs) * spm;
+                const r = b + (mode.scanMs + mode.separatorMs) * spm;
+                drawLiveLineRGB(lineNum, px(r, mode.scanMs), px(g, mode.scanMs), px(b, mode.scanMs), mode.width);
                 break;
             }
             case 'scottie': {
-                const sync = Math.floor(mode.syncMs * samplesPerMs);
-                const porch = Math.floor(mode.porchMs * samplesPerMs);
-                const scan = Math.floor(mode.scanMs * samplesPerMs);
-                const sep = Math.floor(mode.separatorMs * samplesPerMs);
-                
-                const g = lineStart + sep;
-                const b = g + scan + sep;
-                const r = b + scan + sync + porch;
-                
-                const G = decodeLivePixels(g, mode.scanMs, mode.width);
-                const B = decodeLivePixels(b, mode.scanMs, mode.width);
-                const R = decodeLivePixels(r, mode.scanMs, mode.width);
-                drawLiveLineRGB(lineNum, R, G, B, mode.width);
+                const g = lineStart + mode.separatorMs * spm;
+                const b = g + (mode.scanMs + mode.separatorMs) * spm;
+                const r = b + (mode.scanMs + mode.syncMs + mode.porchMs) * spm;
+                drawLiveLineRGB(lineNum, px(r, mode.scanMs), px(g, mode.scanMs), px(b, mode.scanMs), mode.width);
                 break;
             }
         }
@@ -2269,8 +2291,7 @@
     // LIVE CANVAS DRAWING
     // ==========================================================================
     
-    function prepareLiveCanvas() {
-        const mode = SSTV_MODES[liveCurrentMode];
+    function prepareLiveCanvas(mode) {
         const canvas = document.getElementById('liveCanvas');
         canvas.width = mode.width;
         canvas.height = mode.height;
@@ -2289,7 +2310,6 @@
             liveImageData.data[idx+1] = Math.max(0, Math.min(255, Math.round(y - 0.344*u - 0.714*v)));
             liveImageData.data[idx+2] = Math.max(0, Math.min(255, Math.round(y + 1.772*u)));
         }
-        liveMainCtx.putImageData(liveImageData, 0, 0);
     }
     
     function drawLiveLineRGB(line, R, G, B, w) {
@@ -2300,7 +2320,6 @@
             liveImageData.data[idx+1] = G[x];
             liveImageData.data[idx+2] = B[x];
         }
-        liveMainCtx.putImageData(liveImageData, 0, 0);
     }
     
     function clearLiveImage() {
@@ -2310,13 +2329,15 @@
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         document.getElementById('liveProgressFill').style.width = '0%';
         document.getElementById('liveSaveBtn').disabled = true;
-        resetLiveDecoder();
+        document.getElementById('liveStatMode').textContent = '--';
+        document.getElementById('liveStatLine').textContent = '--';
+        if (liveState === 'receiving') { liveRx = null; setLiveState('listening'); }
     }
     
     function saveLiveImage() {
         const canvas = document.getElementById('liveCanvas');
         const link = document.createElement('a');
-        link.download = 'sstv_live_' + (liveCurrentMode || 'image') + '_' + Date.now() + '.png';
+        link.download = 'sstv_live_' + Date.now() + '.png';
         link.href = canvas.toDataURL('image/png');
         link.click();
     }
@@ -2330,24 +2351,6 @@
         document.getElementById('liveStatState').textContent = s.toUpperCase();
     }
     
-    function resetLiveVIS() {
-        liveVisState = 'searching';
-        liveLeaderStartIdx = -1;
-        liveLeaderCount = 0;
-        liveVisBits = [];
-        liveLastDebugLog = 0;
-        liveLastScanIdx = 0;
-    }
-    
-    function resetLiveDecoder() {
-        resetLiveVIS();
-        liveCurrentMode = null;
-        liveCurrentLine = 0;
-        liveChromaU = []; liveChromaV = [];
-        document.getElementById('liveStatMode').textContent = '--';
-        document.getElementById('liveStatLine').textContent = '--';
-    }
-    
     function liveLog(msg) {
         const logDiv = document.getElementById('liveDebugLog');
         const time = new Date().toISOString().substr(11, 8);
@@ -2357,15 +2360,11 @@
     }
     
     function updateLiveVisuals() {
-        if (!liveAnalyserNode) return;
-        
-        const data = new Uint8Array(liveAnalyserNode.frequencyBinCount);
-        liveAnalyserNode.getByteFrequencyData(data);
-        
-        let sum = 0;
-        for (let i = 0; i < data.length; i++) sum += data[i];
-        const avg = sum / data.length;
-        document.getElementById('levelMeter').style.width = Math.min(100, avg / 128 * 100) + '%';
+        document.getElementById('levelMeter').style.width = Math.min(100, liveLevel * 300) + '%';
+        if (liveTrack && liveTrack.len > liveRate * 0.02) {
+            const f = liveTrack.mean(liveTrack.len - liveRate * 0.02, liveTrack.len);
+            document.getElementById('liveFreqDisplay').textContent = Math.round(f) + ' Hz';
+        }
     }
     
     </script>
