@@ -6,8 +6,18 @@
                détection VIS, PLL, AFC, correction Doppler et d'inclinaison,
                modes Robot, Martin, Scottie, PD ; export PNG
   Auteur     : Eric PERRET
-  Date       : 2026-01-17
+  Version    : 1.1
+  Date       : 2026-10-17
   Plateforme : HTML / CSS / JavaScript, Web Audio, fichier unique, aucune librairie
+  Historique :
+    1.0 (2026-01-17) version initiale
+    1.1 (2026-10-17) lecture WAV toutes voies / 8-16-24-32 bits / flottant
+                     (voie 1 retenue) ; VIS conforme : front amorce → start,
+                     7 bits, parité paire, stop ; Robot36 : suivi de la fin
+                     de synchro ligne par ligne et horloge mesurée par droite
+                     des moindres carrés (pas d'inclinaison), chrominance
+                     identifiée par le séparateur 1500 / 2300 Hz et partagée
+                     par couple de lignes, couleur BT.601 échelle studio
 ================================================================================
 -->
 <html lang="fr">
@@ -585,48 +595,59 @@
     
     function parseWAV(arrayBuffer) {
         const view = new DataView(arrayBuffer);
+        const tag = o => String.fromCharCode(view.getUint8(o), view.getUint8(o+1), view.getUint8(o+2), view.getUint8(o+3));
         
-        const riff = String.fromCharCode(view.getUint8(0), view.getUint8(1), view.getUint8(2), view.getUint8(3));
-        if (riff !== 'RIFF') throw new Error('Invalid WAV: no RIFF header');
-        
-        const wave = String.fromCharCode(view.getUint8(8), view.getUint8(9), view.getUint8(10), view.getUint8(11));
-        if (wave !== 'WAVE') throw new Error('Invalid WAV: no WAVE marker');
+        if (arrayBuffer.byteLength < 12 || tag(0) !== 'RIFF') throw new Error('Invalid WAV: no RIFF header');
+        if (tag(8) !== 'WAVE') throw new Error('Invalid WAV: no WAVE marker');
         
         let offset = 12;
-        let bitsPerSample = 16;
+        let fmt = null;
         
-        while (offset < arrayBuffer.byteLength - 8) {
-            const chunkId = String.fromCharCode(
-                view.getUint8(offset), view.getUint8(offset+1),
-                view.getUint8(offset+2), view.getUint8(offset+3)
-            );
+        while (offset + 8 <= arrayBuffer.byteLength) {
+            const chunkId = tag(offset);
             const chunkSize = view.getUint32(offset + 4, true);
+            const body = offset + 8;
             
             if (chunkId === 'fmt ') {
-                sampleRate = view.getUint32(offset + 12, true);
-                bitsPerSample = view.getUint16(offset + 22, true);
-                log(`Format: PCM ${bitsPerSample}-bit, ${sampleRate} Hz`);
+                let format = view.getUint16(body, true);
+                if (format === 0xFFFE && chunkSize >= 40) format = view.getUint16(body + 24, true); // WAVE_FORMAT_EXTENSIBLE
+                fmt = {
+                    format,
+                    channels: view.getUint16(body + 2, true),
+                    rate: view.getUint32(body + 4, true),
+                    blockAlign: view.getUint16(body + 12, true),
+                    bits: view.getUint16(body + 14, true)
+                };
+                sampleRate = fmt.rate;
+                log(`Format: ${fmt.format === 3 ? 'float' : 'PCM'} ${fmt.bits}-bit, ${fmt.channels} voie(s), ${sampleRate} Hz`);
             }
             
             if (chunkId === 'data') {
-                const bytesPerSample = bitsPerSample / 8;
-                const samples = chunkSize / bytesPerSample;
-                audioData = new Float32Array(samples);
+                if (!fmt) throw new Error('Invalid WAV: data before fmt');
+                const bytes = Math.min(chunkSize, arrayBuffer.byteLength - body);
+                const frames = Math.floor(bytes / fmt.blockAlign);
+                audioData = new Float32Array(frames);
+                demodulatedFreq = null;
+                freqSum = null;
                 
-                for (let i = 0; i < samples; i++) {
-                    if (bitsPerSample === 16) {
-                        audioData[i] = view.getInt16(offset + 8 + i * 2, true) / 32768.0;
-                    } else if (bitsPerSample === 8) {
-                        audioData[i] = (view.getUint8(offset + 8 + i) - 128) / 128.0;
-                    }
+                // Voie 1 uniquement
+                for (let i = 0; i < frames; i++) {
+                    const p = body + i * fmt.blockAlign;
+                    let v;
+                    if (fmt.format === 3 && fmt.bits === 32) v = view.getFloat32(p, true);
+                    else if (fmt.bits === 16) v = view.getInt16(p, true) / 32768;
+                    else if (fmt.bits === 8) v = (view.getUint8(p) - 128) / 128;
+                    else if (fmt.bits === 24) v = (view.getUint8(p) | (view.getUint8(p+1) << 8) | (view.getInt8(p+2) << 16)) / 8388608;
+                    else if (fmt.bits === 32) v = view.getInt32(p, true) / 2147483648;
+                    else throw new Error(`Unsupported WAV: ${fmt.bits}-bit`);
+                    audioData[i] = v;
                 }
                 
-                log(`Data loaded: ${samples.toLocaleString()} samples`);
+                log(`Data loaded: ${frames.toLocaleString()} samples`);
                 return;
             }
             
-            offset += 8 + chunkSize;
-            if (chunkSize % 2 !== 0) offset++;
+            offset = body + chunkSize + (chunkSize & 1);
         }
         
         throw new Error('No data chunk found in WAV');
@@ -953,117 +974,74 @@
     // VIS CODE DETECTION
     // ==========================================================================
     
+    // Somme cumulée de la fréquence démodulée : moyenne sur un intervalle en O(1)
+    let freqSum = null;
+    
+    function meanFreq(start, end) {
+        if (!freqSum) {
+            freqSum = new Float64Array(demodulatedFreq.length + 1);
+            for (let i = 0; i < demodulatedFreq.length; i++) freqSum[i + 1] = freqSum[i] + demodulatedFreq[i];
+        }
+        const a = Math.max(0, Math.min(demodulatedFreq.length, Math.round(start)));
+        const b = Math.max(0, Math.min(demodulatedFreq.length, Math.round(end)));
+        return b > a ? (freqSum[b] - freqSum[a]) / (b - a) : 0;
+    }
+    
+    // VIS : amorce 1900 Hz, front vers le bit de start 1200 Hz (repère), 7 bits
+    // de 30 ms poids faible en premier (1100 Hz = 1, 1300 Hz = 0), parité paire,
+    // stop 1200 Hz. L'image commence à la fin du stop (repère + 300 ms).
     function detectVIS() {
         if (!demodulatedFreq) demodulateFullAudio();
         
         log('Searching for VIS code...');
         
-        const samplesPerMs = sampleRate / 1000;
-        const windowSize = Math.floor(20 * samplesPerMs);
+        const spm = sampleRate / 1000;
+        const f = demodulatedFreq;
+        const off = dopplerOffset;
+        const last = f.length - Math.ceil(320 * spm);
         
-        // Find VIS leader (1900Hz for ~300ms)
-        let leaderStart = -1;
-        
-        for (let i = 0; i < Math.min(demodulatedFreq.length, sampleRate * 5); i += windowSize) {
-            let sum = 0;
-            for (let j = 0; j < windowSize && i + j < demodulatedFreq.length; j++) {
-                sum += demodulatedFreq[i + j];
+        for (let e = Math.ceil(300 * spm); e < last; e += Math.max(1, Math.floor(spm))) {
+            // Amorce avant, bit de start après
+            if (Math.abs(meanFreq(e - 250 * spm, e - 20 * spm) - 1900 - off) > 60) continue;
+            if (Math.abs(meanFreq(e + 5 * spm, e + 25 * spm) - 1200 - off) > 60) continue;
+            
+            // Front précis amorce -> start (seuil 1550 Hz)
+            const thr = 1550 + off;
+            let edge = -1;
+            for (let i = Math.floor(e - 15 * spm); i < e + 15 * spm; i++) {
+                if (meanFreq(i - 0.5 * spm, i) >= thr && meanFreq(i, i + 0.5 * spm) < thr) { edge = i; break; }
             }
-            const avgFreq = sum / windowSize;
+            if (edge < 0) continue;
             
-            if (avgFreq > 1850 + dopplerOffset && avgFreq < 1950 + dopplerOffset) {
-                leaderStart = i;
-                log(`VIS leader found at ${(i/sampleRate).toFixed(3)}s (${avgFreq.toFixed(0)}Hz)`);
-                break;
+            // 7 bits de données + parité
+            const bits = [];
+            let valid = true;
+            for (let b = 0; b < 8; b++) {
+                const m = meanFreq(edge + (30 * (b + 1) + 5) * spm, edge + (30 * (b + 2) - 5) * spm);
+                if (Math.abs(m - 1100 - off) > 80 && Math.abs(m - 1300 - off) > 80) { valid = false; break; }
+                bits.push(m < 1200 + off ? 1 : 0);
             }
-        }
-        
-        if (leaderStart < 0) {
-            log('No VIS leader found');
-            return null;
-        }
-        
-        // Skip: Leader(300ms) + Break(10ms) + Leader(300ms) = 610ms
-        const visDataStart = leaderStart + Math.floor(620 * samplesPerMs);
-        const bitDuration = Math.floor(30 * samplesPerMs);
-        
-        // Read 8 data bits
-        let visCode = 0;
-        log('Reading VIS bits:');
-        
-        for (let bit = 0; bit < 8; bit++) {
-            const bitStart = visDataStart + bit * bitDuration;
-            const bitCenter = bitStart + Math.floor(bitDuration / 2);
+            if (!valid) continue;
             
-            // Sample middle of bit
-            let sum = 0;
-            const sampleWindow = Math.floor(10 * samplesPerMs);
-            for (let j = 0; j < sampleWindow; j++) {
-                const idx = bitCenter - sampleWindow/2 + j;
-                if (idx >= 0 && idx < demodulatedFreq.length) {
-                    sum += demodulatedFreq[idx];
-                }
+            const stop = meanFreq(edge + 275 * spm, edge + 295 * spm);
+            if (Math.abs(stop - 1200 - off) > 60) continue;
+            
+            let visCode = 0, ones = 0;
+            for (let b = 0; b < 7; b++) { visCode |= bits[b] << b; ones += bits[b]; }
+            if ((ones + bits[7]) % 2 !== 0) {
+                log(`VIS 0x${visCode.toString(16).toUpperCase()} rejeté (parité) à ${(edge / sampleRate).toFixed(3)}s`);
+                continue;
             }
-            const avgFreq = sum / sampleWindow;
             
-            // 1100Hz = 1, 1300Hz = 0 (with Doppler offset)
-            const threshold = 1200 + dopplerOffset;
-            const bitValue = avgFreq < threshold ? 1 : 0;
-            visCode |= (bitValue << bit);
-            
-            log(`  Bit ${bit}: ${avgFreq.toFixed(0)}Hz -> ${bitValue}`);
+            const imageStart = Math.round(edge + 300 * spm);
+            log(`VIS start bit at ${(edge / sampleRate).toFixed(4)}s, bits ${bits.slice(0, 7).join('')} parity ${bits[7]}`);
+            log(`VIS code: 0x${visCode.toString(16).toUpperCase()} (${visCode})`);
+            log(`Image starts at ${(imageStart / sampleRate * 1000).toFixed(2)}ms`);
+            return { visCode, imageStart, leaderStart: Math.round(edge - 610 * spm) };
         }
         
-        log(`VIS code: 0x${visCode.toString(16).toUpperCase()} (${visCode})`);
-        
-        // Calculate theoretical image start (after parity + stop bit)
-        const theoreticalStart = visDataStart + 10 * bitDuration;
-        
-        // But we need to find the REAL first sync pulse after the VIS
-        // Search for first 1200Hz sync pulse (duration ~9ms) after theoretical start
-        log('Searching for first line sync after VIS...');
-        
-        const searchStart = theoreticalStart;
-        const searchEnd = Math.min(theoreticalStart + Math.floor(500 * samplesPerMs), demodulatedFreq.length);
-        const minSyncDuration = Math.floor(4 * samplesPerMs);
-        const maxSyncDuration = Math.floor(15 * samplesPerMs);
-        
-        let inSync = false;
-        let syncStart = 0;
-        let firstSyncFound = -1;
-        
-        for (let i = searchStart; i < searchEnd; i += Math.floor(samplesPerMs)) {
-            const freq = demodulatedFreq[i];
-            
-            if (freq > 1100 + dopplerOffset && freq < 1300 + dopplerOffset) {
-                if (!inSync) {
-                    syncStart = i;
-                    inSync = true;
-                }
-            } else {
-                if (inSync) {
-                    const duration = i - syncStart;
-                    // Valid sync pulse should be 4-15ms (accounting for Robot 9ms, Martin 4.8ms, etc)
-                    if (duration >= minSyncDuration && duration <= maxSyncDuration) {
-                        firstSyncFound = syncStart;
-                        log(`First line sync found at ${(syncStart/sampleRate*1000).toFixed(2)}ms (duration ${(duration/samplesPerMs).toFixed(2)}ms)`);
-                        break;
-                    }
-                    inSync = false;
-                }
-            }
-        }
-        
-        let imageStart;
-        if (firstSyncFound > 0) {
-            imageStart = firstSyncFound;
-            log(`Image starts at first sync: ${(imageStart/sampleRate*1000).toFixed(2)}ms`);
-        } else {
-            imageStart = theoreticalStart;
-            log(`No sync found, using theoretical start: ${(imageStart/sampleRate*1000).toFixed(2)}ms`, 'warning');
-        }
-        
-        return { visCode, imageStart, leaderStart };
+        log('No VIS found');
+        return null;
     }
     
     // ==========================================================================
@@ -1245,6 +1223,54 @@
     // ROBOT MODE DECODER
     // ==========================================================================
     
+    // Fin de synchro (montée 1200 -> 1500 Hz, seuil 1350 Hz) la plus proche de
+    // 'expected' dans ±winMs ; position fractionnaire en échantillons, ou -1
+    function findSyncEnd(expected, winMs, syncMs) {
+        const spm = sampleRate / 1000;
+        const f = demodulatedFreq;
+        const thr = 1350 + dopplerOffset;
+        const a = Math.max(1, Math.floor(expected - winMs * spm));
+        const b = Math.min(f.length - 1, Math.ceil(expected + winMs * spm));
+        let best = -1, bestDist = Infinity;
+        
+        for (let i = a; i <= b; i++) {
+            if (f[i - 1] < thr && f[i] >= thr) {
+                const pos = i - 1 + (thr - f[i - 1]) / (f[i] - f[i - 1]);
+                if (meanFreq(pos - 0.8 * syncMs * spm, pos - 0.5 * spm) < thr &&
+                    meanFreq(pos + 0.3 * spm, pos + 2.5 * spm) > thr) {
+                    const d = Math.abs(pos - expected);
+                    if (d < bestDist) { bestDist = d; best = pos; }
+                }
+            }
+        }
+        return best;
+    }
+    
+    // Droite des moindres carrés pos = a + b * ligne, avec rejet des écarts > 1 ms
+    function fitLine(points, spm) {
+        let pts = points;
+        let a = 0, b = 0;
+        for (let pass = 0; pass < 3; pass++) {
+            const n = pts.length;
+            if (n < 2) break;
+            let sx = 0, sy = 0, sxx = 0, sxy = 0;
+            for (const [x, y] of pts) { sx += x; sy += y; sxx += x * x; sxy += x * y; }
+            b = (n * sxy - sx * sy) / (n * sxx - sx * sx);
+            a = (sy - b * sx) / n;
+            pts = points.filter(([x, y]) => Math.abs(y - (a + b * x)) < spm);
+        }
+        return { a, b, used: pts.length };
+    }
+    
+    // Conversion Y, R-Y, B-Y (0-255) -> RGB, BT.601 échelle studio (Barber N7CXI)
+    function yuvStudioToRgb(y, cr, cb, out, idx) {
+        const yy = 1.164383 * (y - 16);
+        out[idx]     = Math.max(0, Math.min(255, Math.round(yy + 1.596027 * (cr - 128))));
+        out[idx + 1] = Math.max(0, Math.min(255, Math.round(yy - 0.391762 * (cb - 128) - 0.812968 * (cr - 128))));
+        out[idx + 2] = Math.max(0, Math.min(255, Math.round(yy + 2.017232 * (cb - 128))));
+        out[idx + 3] = 255;
+    }
+    
     function decodeRobot(mode, imageStart) {
         const canvas = document.getElementById('canvas');
         canvas.width = mode.width;
@@ -1252,68 +1278,68 @@
         const ctx = canvas.getContext('2d');
         const imgData = ctx.createImageData(mode.width, mode.height);
         
-        const samplesPerMs = sampleRate / 1000;
+        const spm = sampleRate / 1000;
+        const lineMs = mode.syncMs + mode.porchMs + mode.scanMs +
+                       (mode.separatorMs || 0) + (mode.chromaPorchMs || 0) + (mode.chromaMs || 0);
+        const lineSamples = lineMs * spm;
         
-        // Robot timing
-        const syncSamples = Math.floor(mode.syncMs * samplesPerMs);
-        const porchSamples = Math.floor(mode.porchMs * samplesPerMs);
-        const scanSamples = Math.floor(mode.scanMs * samplesPerMs);
-        const sepSamples = Math.floor((mode.separatorMs || 0) * samplesPerMs);
-        const chromaPorchSamples = Math.floor((mode.chromaPorchMs || 0) * samplesPerMs);
-        const chromaSamples = Math.floor((mode.chromaMs || 0) * samplesPerMs);
+        log(`Robot decode: ${mode.height} lines, ${lineMs.toFixed(3)}ms/line nominal`);
         
-        const lineDuration = mode.syncMs + mode.porchMs + mode.scanMs + 
-                           (mode.separatorMs || 0) + (mode.chromaPorchMs || 0) + (mode.chromaMs || 0);
-        const samplesPerLine = Math.floor(lineDuration * samplesPerMs);
-        
-        log(`Robot decode: ${mode.height} lines, ${lineDuration.toFixed(2)}ms/line`);
-        
-        const Y = [], U = [], V = [];
-        
+        // 1. Fin de synchro de chaque ligne, suivie de proche en proche
+        const points = [];
+        let expected = imageStart + mode.syncMs * spm;
         for (let line = 0; line < mode.height; line++) {
-            const lineStart = imageStart + line * samplesPerLine;
-            
-            // Y (luminance)
-            const yStart = lineStart + syncSamples + porchSamples;
-            Y[line] = decodeLine(yStart, mode.scanMs, mode.width);
-            
-            // Chrominance (if color mode)
-            if (mode.chromaMs) {
-                const chromaStart = yStart + scanSamples + sepSamples + chromaPorchSamples;
-                const chromaData = decodeLine(chromaStart, mode.chromaMs, mode.width);
-                
-                // Even lines = R-Y (V), Odd lines = B-Y (U)
-                if (line % 2 === 0) {
-                    V[line] = chromaData;
-                    U[line] = line > 0 ? U[line-1] : new Uint8Array(mode.width).fill(128);
-                } else {
-                    U[line] = chromaData;
-                    V[line] = V[line-1] || new Uint8Array(mode.width).fill(128);
-                }
-            } else {
-                U[line] = new Uint8Array(mode.width).fill(128);
-                V[line] = new Uint8Array(mode.width).fill(128);
-            }
-            
-            updateProgress(50 + (line + 1) / mode.height * 50);
+            const pos = findSyncEnd(expected, line === 0 ? 20 : 4, mode.syncMs);
+            if (pos >= 0) points.push([line, pos]);
+            expected = (pos >= 0 ? pos : expected) + lineSamples;
+            updateProgress(50 + (line + 1) / mode.height * 25);
         }
         
-        // Convert to RGB
+        // 2. Horloge mesurée : droite des moindres carrés
+        let a, b;
+        if (points.length >= 10) {
+            const fit = fitLine(points, spm);
+            a = fit.a; b = fit.b;
+            log(`Syncs: ${points.length}/${mode.height} found, ${fit.used} used`);
+            log(`Measured line period: ${(b / spm).toFixed(4)}ms (${((b / lineSamples - 1) * 1e6).toFixed(0)} ppm)`);
+        } else {
+            a = imageStart + mode.syncMs * spm; b = lineSamples;
+            log(`Syncs: ${points.length}/${mode.height} found, nominal clock used`);
+        }
+        const k = b / lineSamples;   // échelle de temps mesurée / nominale
+        
+        // 3. Lecture des lignes à partir de la fin de synchro
+        const Y = [], C = [], isCr = [];
         for (let line = 0; line < mode.height; line++) {
+            const syncEnd = a + b * line;
+            const yStart = syncEnd + mode.porchMs * spm * k;
+            Y[line] = decodeLine(yStart, mode.scanMs * k, mode.width);
+            
+            if (mode.chromaMs) {
+                const sepStart = yStart + mode.scanMs * spm * k;
+                const sepFreq = meanFreq(sepStart + 0.5 * spm * k, sepStart + (mode.separatorMs - 0.5) * spm * k) - dopplerOffset;
+                // Séparateur 1500 Hz : R-Y ; 2300 Hz : B-Y ; ambigu : parité de ligne
+                isCr[line] = (sepFreq < 1700) ? true : (sepFreq > 2100) ? false : (line % 2 === 0);
+                const cStart = sepStart + (mode.separatorMs + mode.chromaPorchMs) * spm * k;
+                C[line] = decodeLine(cStart, mode.chromaMs * k, mode.width);
+            }
+            updateProgress(75 + (line + 1) / mode.height * 25);
+        }
+        
+        // 4. Couleur : R-Y et B-Y partagés par le couple de lignes (2n, 2n+1)
+        const neutral = new Uint8Array(mode.width).fill(128);
+        for (let line = 0; line < mode.height; line++) {
+            let cr = neutral, cb = neutral;
+            if (mode.chromaMs) {
+                const mate = line ^ 1;
+                for (const l of [line, mate]) {
+                    if (l >= mode.height || !C[l]) continue;
+                    if (isCr[l]) { if (cr === neutral) cr = C[l]; }
+                    else if (cb === neutral) cb = C[l];
+                }
+            }
             for (let x = 0; x < mode.width; x++) {
-                const y = Y[line][x];
-                const u = (U[line] ? U[line][x] : 128) - 128;
-                const v = (V[line] ? V[line][x] : 128) - 128;
-                
-                const r = y + 1.402 * v;
-                const g = y - 0.344 * u - 0.714 * v;
-                const b = y + 1.772 * u;
-                
-                const idx = (line * mode.width + x) * 4;
-                imgData.data[idx]     = Math.max(0, Math.min(255, Math.round(r)));
-                imgData.data[idx + 1] = Math.max(0, Math.min(255, Math.round(g)));
-                imgData.data[idx + 2] = Math.max(0, Math.min(255, Math.round(b)));
-                imgData.data[idx + 3] = 255;
+                yuvStudioToRgb(Y[line][x], cr[x], cb[x], imgData.data, (line * mode.width + x) * 4);
             }
         }
         
