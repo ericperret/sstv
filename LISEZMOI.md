@@ -81,6 +81,7 @@ La SSTV sert aux radioamateurs pour transmettre des images en HF / VHF. Ces outi
 | 2026-10-17 | Décodeur 1.6 : micro avec annulation d'écho et réduction de bruit coupées, préampli (gain automatique) actif avec un bouton pour le couper ; téléchargement PNG et WAV corrigé sur Chrome Android |
 | 2026-10-18 | Approuvé : émetteur 4.1, décodeur 1.6. En cours dans [dev/](https://ericperret.github.io/sstv/dev/index2.html) : émetteur 4.2 (Robot72 corrigé, PD90 / PD160 / PD240), décodeur 1.7 (tous les modes avec suivi de synchro, choix de la famille au micro, tampon de 5 minutes redécodé en touchant l'image) |
 | 2026-10-18 | Approuvé : diagnostic 2.0 |
+| 2026-10-18 | En cours dans dev/ : décodeur 1.8, onglet fichier avec le diagnostic intégré : ouvrir un WAV lance les mesures et décode aussitôt si le mode est connu (VIS ou choisi) ; correction de fréquence automatique (AFC) mesurée sur l'amorce du VIS et les synchros, jusqu'à ±250 Hz ; boutons Analyser / Décoder, Doppler manuel, forme d'onde et spectrogramme supprimés |
 
 ## Licence
 

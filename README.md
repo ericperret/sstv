@@ -81,6 +81,7 @@ SSTV is used by radio amateurs to send images over HF / VHF. These tools let you
 | 2026-10-17 | Decoder 1.6: microphone with echo cancellation and noise suppression off, automatic gain (preamp) on with a button to turn it off; PNG and WAV downloads fixed on Chrome Android |
 | 2026-10-18 | Approved: transmitter 4.1, decoder 1.6. In progress in [dev/](https://ericperret.github.io/sstv/dev/index2.html): transmitter 4.2 (Robot72 fixed, PD90 / PD160 / PD240), decoder 1.7 (all modes with sync tracking, microphone family selector, 5-minute buffer re-decoded by tapping the image) |
 | 2026-10-18 | Approved: diagnostic 2.0 |
+| 2026-10-18 | In progress in dev/: decoder 1.8, file tab with the built-in diagnostic: opening a WAV runs the measurements and decodes at once when the mode is known (VIS or chosen); automatic frequency correction (AFC) measured on the VIS leader and the sync pulses, up to ±250 Hz; Analyse / Decode buttons, manual Doppler, waveform and spectrogram removed |
 
 ## License
 

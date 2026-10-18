@@ -6,7 +6,7 @@
                détection VIS, PLL, AFC, correction Doppler et d'inclinaison,
                modes Robot, Martin, Scottie, PD ; export PNG
   Auteur     : Eric PERRET
-  Version    : 1.7
+  Version    : 1.8
   Date       : 2026-10-17
   Plateforme : HTML / CSS / JavaScript, Web Audio, fichier unique, aucune librairie
   Historique :
@@ -53,13 +53,19 @@
                      des 5 dernières minutes, toucher l'image redécode le
                      tampon dans le sous-mode suivant, même après STOP ;
                      correction d'inclinaison manuelle supprimée
+    1.8 (2026-10-18) onglet fichier : le diagnostic 2.0 est intégré ; ouvrir
+                     un WAV lance les mesures et, si le mode est connu (VIS
+                     ou choisi), le décodage ; AFC automatique sur la fréquence
+                     des synchros ; boutons Analyser / Décoder, Doppler manuel,
+                     estimations Doppler / SNR, forme d'onde et spectrogramme
+                     supprimés
 ================================================================================
 -->
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Décodeur SSTV v1.7</title>
+    <title>Décodeur SSTV v1.8</title>
     <style>
         body {
             font-family: 'Consolas', 'Monaco', monospace;
@@ -152,6 +158,16 @@
             display: flex; justify-content: space-between;
             font-size: 10px; color: #666;
         }
+        .plot { width: 100%; background: #000; border: 1px solid #333; display: block; }
+        #freqCanvas { cursor: crosshair; touch-action: manipulation; }
+        .warn { color: #ffcc00; }
+        table.results { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 10px; }
+        table.results td, table.results th { border: 1px solid #333; padding: 6px; text-align: left; }
+        table.results th { background: #001100; color: #00ffff; }
+        table.results td.num { text-align: right; white-space: nowrap; }
+        .zoom-controls { display: flex; gap: 10px; align-items: center; margin: 10px 0; flex-wrap: wrap; }
+        .zoom-controls input[type="range"] { flex: 1; min-width: 120px; accent-color: #00ff00; }
+        #measure { font-size: 13px; margin-top: 8px; min-height: 1.4em; }
         .family-select {
             min-height: 48px;
             padding: 8px 16px;
@@ -219,25 +235,6 @@
             margin: 10px 0;
             border-left: 4px solid #ff4444;
         }
-        .debug {
-            background-color: #000;
-            color: #00ff00;
-            padding: 10px;
-            border-radius: 5px;
-            margin: 10px 0;
-            font-size: 11px;
-            max-height: 300px;
-            overflow-y: auto;
-            border: 1px solid #333;
-        }
-        .spectrum-canvas {
-            width: 100%;
-            height: 150px;
-            background-color: #000;
-            border: 1px solid #333;
-            border-radius: 4px;
-            margin: 10px 0;
-        }
         label {
             display: inline-block;
             width: 200px;
@@ -247,27 +244,6 @@
             font-size: 18px;
             color: #00ffff;
             font-weight: bold;
-        }
-        .stats {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 10px;
-            margin: 10px 0;
-        }
-        .stat-box {
-            background: #001100;
-            padding: 10px;
-            border-radius: 5px;
-            text-align: center;
-            border: 1px solid #333;
-        }
-        .stat-value {
-            font-size: 24px;
-            color: #00ffff;
-        }
-        .stat-label {
-            font-size: 11px;
-            color: #666;
         }
         .row {
             display: flex;
@@ -290,7 +266,7 @@
 <body>
     <div class="container">
         <h1>📡 SSTV Decoder Ultimate</h1>
-        <p class="subtitle">Version 1.7 — Fichier WAV et micro en direct</p>
+        <p class="subtitle">Version 1.8 — Fichier WAV et micro en direct</p>
         
         <!-- TABS -->
         <div class="tabs" style="display:flex;gap:5px;margin-bottom:15px;">
@@ -302,18 +278,25 @@
         <div id="fileTabContent" class="tab-content" style="display:block;">
         
         <div class="control-group">
-            <h3>1. Charger un fichier WAV</h3>
+            <h3>1. Fichier WAV</h3>
             <input type="file" id="fileInput" accept=".wav,audio/wav">
             <div id="fileInfo" class="info" style="display:none;"></div>
+            <div id="status" class="info warn" style="display:none;"></div>
         </div>
         
         <div class="control-group">
-            <h3>2. Configuration</h3>
-            <div class="row" style="margin-bottom:15px;">
-                <div>
-                    <label>Mode forcé:</label>
-                    <select id="forceMode">
-                        <option value="auto">Auto-détection (VIS)</option>
+            <h3 id="imageTitle">2. Image décodée</h3>
+            <canvas id="canvas" width="320" height="240"></canvas>
+            <div style="text-align:center;">
+                <button id="saveBtn" disabled style="border-color:#00ffff;color:#00ffff;">💾 Sauvegarder PNG</button>
+            </div>
+        </div>
+        
+        <div class="control-group">
+            <h3>3. Mesures</h3>
+            <span>Mode : </span>
+            <select id="forceMode">
+                        <option value="auto">Automatique (VIS)</option>
                         <optgroup label="Robot">
                             <option value="robot36">Robot36 Color</option>
                             <option value="robot72">Robot72 Color</option>
@@ -334,57 +317,25 @@
                             <option value="pd240">PD240</option>
                         </optgroup>
                     </select>
-                </div>
-            </div>
-            <div class="row" style="margin-bottom:15px;">
-                <div>
-                    <label>Décalage Doppler manuel (Hz):</label>
-                    <input type="number" id="dopplerOffset" value="0" min="-500" max="500">
-                </div>
-                <div>
-                    <label>AFC (Auto Freq Control):</label>
-                    <select id="afcMode">
-                        <option value="auto">Auto (sync pulse)</option>
-                        <option value="off">Désactivé</option>
-                    </select>
-                </div>
-            </div>
+            <table id="results" class="results"></table>
         </div>
         
         <div class="control-group">
-            <h3>3. Décodage</h3>
-            <button id="analyzeBtn" disabled>📊 Analyser signal</button>
-            <button id="decodeBtn" disabled>🔍 Décoder</button>
-            <button id="saveBtn" disabled style="border-color:#00ffff;color:#00ffff;">💾 Sauvegarder PNG</button>
-            <div class="progress-bar" id="progressBar" style="display:none;">
-                <div class="progress-fill" id="progressFill"></div>
-            </div>
-            <div id="status" class="info" style="display:none;"></div>
+            <h3>4. Écart des synchros au rythme nominal (ms), droite mesurée</h3>
+            <canvas id="driftCanvas" class="plot" height="220"></canvas>
         </div>
         
         <div class="control-group">
-            <h3>4. Analyse du signal</h3>
-            <div class="stats">
-                <div class="stat-box">
-                    <div class="stat-value" id="statDoppler">--</div>
-                    <div class="stat-label">Doppler estimé (Hz)</div>
-                </div>
-                <div class="stat-box">
-                    <div class="stat-value" id="statSNR">--</div>
-                    <div class="stat-label">SNR estimé (dB)</div>
-                </div>
-                <div class="stat-box">
-                    <div class="stat-value" id="statMode">--</div>
-                    <div class="stat-label">Mode détecté</div>
-                </div>
+            <h3>5. Fréquence instantanée (cliquer pour mesurer)</h3>
+            <div class="zoom-controls">
+                <span>Zoom</span>
+                <input type="range" id="zoomRange" min="0" max="200" value="0">
+                <span id="zoomLabel">1x</span>
+                <span>Position</span>
+                <input type="range" id="offsetRange" min="0" max="1000" value="0">
             </div>
-            <canvas id="waveformCanvas" class="spectrum-canvas" width="1000" height="100"></canvas>
-            <canvas id="spectrogramCanvas" class="spectrum-canvas" width="1000" height="150"></canvas>
-        </div>
-        
-        <div class="control-group">
-            <h3>5. Image décodée</h3>
-            <canvas id="canvas" width="640" height="496"></canvas>
+            <canvas id="freqCanvas" class="plot" height="220"></canvas>
+            <div id="measure"></div>
         </div>
         
         </div><!-- END FILE TAB -->
@@ -506,56 +457,49 @@
     // UI HANDLERS
     // ==========================================================================
     
+    let wavFormat = null;        // format du fichier chargé
+    
     document.getElementById('fileInput').addEventListener('change', handleFileSelect);
-    document.getElementById('analyzeBtn').addEventListener('click', analyzeSignal);
-    document.getElementById('decodeBtn').addEventListener('click', handleDecode);
+    document.getElementById('forceMode').addEventListener('change', runFile);
     document.getElementById('saveBtn').addEventListener('click', saveImage);
+    document.getElementById('zoomRange').addEventListener('input', drawFreq);
+    document.getElementById('offsetRange').addEventListener('input', drawFreq);
+    document.getElementById('freqCanvas').addEventListener('click', e => measureAt(e.clientX));
+    window.addEventListener('resize', () => { if (diagTrack) { drawDrift(); drawFreq(); } });
     
     function log(msg) {
         const timestamp = new Date().toISOString().substr(11, 12);
         debugLog.push(`[${timestamp}] ${msg}`);   // mémoire interne, jamais affichée
     }
     
-    function updateProgress(percent) {
-        document.getElementById('progressFill').style.width = percent + '%';
-    }
-    
-    function showError(msg) {
-        const errorDiv = document.getElementById('error');
-        errorDiv.style.display = 'block';
-        errorDiv.textContent = msg;
-        log('ERROR: ' + msg);
+    function showStatus(msg) {
+        const s = document.getElementById('status');
+        s.textContent = msg || '';
+        s.style.display = msg ? 'block' : 'none';
     }
     
     // ==========================================================================
     // WAV LOADING
     // ==========================================================================
     
+    // Ouverture d'un fichier : mesures, puis décodage si le mode est connu
     function handleFileSelect(event) {
         const file = event.target.files[0];
         if (!file) return;
-        
         debugLog = [];
-        log(`Loading: ${file.name} (${Math.round(file.size/1024)} KB)`);
-        
         const reader = new FileReader();
         reader.onload = function(e) {
             try {
                 parseWAV(e.target.result);
-                document.getElementById('analyzeBtn').disabled = false;
-                document.getElementById('decodeBtn').disabled = false;
-                
-                const duration = (audioData.length / sampleRate).toFixed(2);
+                demodulateFullAudio();
                 const info = document.getElementById('fileInfo');
                 info.style.display = 'block';
-                info.innerHTML = `Sample rate: ${sampleRate} Hz | Duration: ${duration}s | Samples: ${audioData.length.toLocaleString()}`;
-                
-                log(`WAV loaded: ${sampleRate}Hz, ${duration}s, ${audioData.length} samples`);
-                
-                drawWaveform();
-                
+                info.textContent = `${sampleRate} Hz, ${wavFormat.channels} voie(s), ${wavFormat.bits} bits, ${(audioData.length / sampleRate).toFixed(2)} s`;
+                markA = markB = null;
+                document.getElementById('measure').textContent = '';
+                runFile();
             } catch (err) {
-                showError('WAV read error: ' + err.message);
+                showStatus('WAV : ' + err.message);
             }
         };
         reader.readAsArrayBuffer(file);
@@ -587,6 +531,7 @@
                     bits: view.getUint16(body + 14, true)
                 };
                 sampleRate = fmt.rate;
+                wavFormat = fmt;
                 log(`Format: ${fmt.format === 3 ? 'float' : 'PCM'} ${fmt.bits}-bit, ${fmt.channels} voie(s), ${sampleRate} Hz`);
             }
             
@@ -619,61 +564,6 @@
         }
         
         throw new Error('No data chunk found in WAV');
-    }
-    
-    // ==========================================================================
-    // FM DEMODULATION - PLL (Phase-Locked Loop)
-    // ==========================================================================
-    
-    class PLL {
-        constructor(sampleRate, centerFreq = 1900, bandwidth = 500) {
-            this.sampleRate = sampleRate;
-            this.centerFreq = centerFreq;
-            this.phase = 0;
-            this.freq = centerFreq;
-            
-            // PLL loop filter coefficients
-            // Bandwidth determines tracking speed vs noise immunity
-            const damping = 0.707;  // Critically damped
-            const omega = 2 * Math.PI * bandwidth / sampleRate;
-            
-            this.alpha = 2 * damping * omega;  // Phase detector gain
-            this.beta = omega * omega;          // Frequency detector gain
-            
-            // Limits
-            this.minFreq = 1000;
-            this.maxFreq = 2500;
-        }
-        
-        process(sample) {
-            // Generate local oscillator
-            const lo_i = Math.cos(this.phase);
-            const lo_q = Math.sin(this.phase);
-            
-            // Phase detector (multiply and get phase error)
-            // For real input, we use a simplified approach
-            const phaseError = sample * lo_q;
-            
-            // Loop filter (PI controller)
-            this.freq += this.beta * phaseError;
-            this.freq = Math.max(this.minFreq, Math.min(this.maxFreq, this.freq));
-            
-            const phaseAdj = this.alpha * phaseError;
-            
-            // Update phase
-            this.phase += 2 * Math.PI * this.freq / this.sampleRate + phaseAdj;
-            
-            // Wrap phase
-            while (this.phase > 2 * Math.PI) this.phase -= 2 * Math.PI;
-            while (this.phase < 0) this.phase += 2 * Math.PI;
-            
-            return this.freq;
-        }
-        
-        reset(freq = 1900) {
-            this.freq = freq;
-            this.phase = 0;
-        }
     }
     
     // ==========================================================================
@@ -710,7 +600,7 @@
             const freq = sampleRate / (halfPeriod * 2);
             
             // Only accept valid SSTV frequencies
-            if (freq >= 1000 && freq <= 2500) {
+            if (freq >= 700 && freq <= 2800) {   // large : décalages de fréquence jusqu'à ±250 Hz
                 const startSample = Math.floor(crossings[i-1]);
                 const endSample = Math.min(Math.floor(crossings[i]), freqs.length - 1);
                 
@@ -729,81 +619,6 @@
                 lastValid = freqs[i];
             }
         }
-        
-        return freqs;
-    }
-    
-    // ==========================================================================
-    // FM DEMODULATION - Quadrature (Hilbert Transform)
-    // ==========================================================================
-    
-    function demodulateQuadrature(samples, sampleRate) {
-        const n = samples.length;
-        const freqs = new Float32Array(n);
-        
-        // Hilbert transform via FIR filter (truncated ideal)
-        // Using a simple 31-tap approximation
-        const hilbertLen = 31;
-        const hilbert = new Float32Array(hilbertLen);
-        const mid = Math.floor(hilbertLen / 2);
-        
-        for (let i = 0; i < hilbertLen; i++) {
-            const k = i - mid;
-            if (k === 0) {
-                hilbert[i] = 0;
-            } else if (k % 2 !== 0) {
-                hilbert[i] = 2 / (Math.PI * k);
-            } else {
-                hilbert[i] = 0;
-            }
-        }
-        
-        // Apply Hilbert transform to get quadrature component
-        const Q = new Float32Array(n);
-        for (let i = mid; i < n - mid; i++) {
-            let sum = 0;
-            for (let j = 0; j < hilbertLen; j++) {
-                sum += samples[i - mid + j] * hilbert[j];
-            }
-            Q[i] = sum;
-        }
-        
-        // Instantaneous frequency from phase derivative
-        // f = (1/2π) * d(atan2(Q,I))/dt
-        for (let i = 1; i < n - 1; i++) {
-            const I = samples[i];
-            const Iq = Q[i];
-            const I_prev = samples[i-1];
-            const Q_prev = Q[i-1];
-            
-            // Phase difference using cross-product formula
-            // avoids atan2 discontinuities
-            const num = I * Q_prev - Iq * I_prev;
-            const den = I * I_prev + Iq * Q_prev;
-            
-            let dPhase = Math.atan2(num, den);
-            let freq = dPhase * sampleRate / (2 * Math.PI);
-            
-            // Shift to positive frequency (baseband to SSTV range)
-            freq = Math.abs(freq);
-            
-            // This gives us deviation from carrier - need to add center freq
-            // Actually for SSTV audio, we measure directly
-            // Re-estimate using zero-crossing for now on problem areas
-            if (freq < 500) {
-                // Low freq = near zero crossing, estimate from amplitude
-                freq = 1500; // Default to black level
-            } else if (freq > 2500) {
-                freq = 2300;
-            } else if (freq < 1000) {
-                freq = 1200;
-            }
-            
-            freqs[i] = freq;
-        }
-        
-        freqs[0] = freqs[1];
-        freqs[n-1] = freqs[n-2];
         
         return freqs;
     }
@@ -867,75 +682,12 @@
             const freqs = demodulateHybrid(samples, sampleRate);
             demodulatedFreq.set(freqs, start);
             
-            updateProgress((chunk + 1) / numChunks * 50); // First 50%
         }
         
         const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
         log(`Demodulation complete in ${elapsed}s`);
         
         return demodulatedFreq;
-    }
-    
-    // ==========================================================================
-    // DOPPLER ESTIMATION via SYNC PULSES
-    // ==========================================================================
-    
-    function estimateDoppler() {
-        if (!demodulatedFreq) demodulateFullAudio();
-        
-        log('Estimating Doppler shift from sync pulses...');
-        
-        const samplesPerMs = sampleRate / 1000;
-        const windowSize = Math.floor(5 * samplesPerMs); // 5ms windows
-        const step = Math.floor(10 * samplesPerMs);       // 10ms steps
-        
-        const syncFreqs = [];
-        
-        // Search for 1200Hz sync pulses
-        for (let i = 0; i < demodulatedFreq.length - windowSize; i += step) {
-            // Average frequency in window
-            let sum = 0;
-            for (let j = 0; j < windowSize; j++) {
-                sum += demodulatedFreq[i + j];
-            }
-            const avgFreq = sum / windowSize;
-            
-            // If it looks like a sync pulse (around 1200Hz)
-            if (avgFreq > 1100 && avgFreq < 1350) {
-                syncFreqs.push({
-                    time: i / sampleRate,
-                    freq: avgFreq
-                });
-            }
-        }
-        
-        if (syncFreqs.length < 10) {
-            log('Not enough sync pulses found for Doppler estimation');
-            return 0;
-        }
-        
-        // Calculate average deviation from 1200Hz
-        let totalDeviation = 0;
-        for (const s of syncFreqs) {
-            totalDeviation += s.freq - FREQ.SYNC;
-        }
-        const avgDoppler = totalDeviation / syncFreqs.length;
-        
-        // Also check for Doppler drift (linear regression)
-        const n = syncFreqs.length;
-        let sumX = 0, sumY = 0, sumXY = 0, sumXX = 0;
-        for (const s of syncFreqs) {
-            sumX += s.time;
-            sumY += s.freq - FREQ.SYNC;
-            sumXY += s.time * (s.freq - FREQ.SYNC);
-            sumXX += s.time * s.time;
-        }
-        const slope = (n * sumXY - sumX * sumY) / (n * sumXX - sumX * sumX);
-        
-        log(`Doppler: avg=${avgDoppler.toFixed(1)}Hz, drift=${slope.toFixed(3)}Hz/s`);
-        log(`Found ${syncFreqs.length} sync pulses`);
-        
-        return avgDoppler;
     }
     
     // ==========================================================================
@@ -1024,14 +776,12 @@
         return fileTrack;
     }
     
-    function meanFreq(start, end) {
-        return getFileTrack().mean(start, end);
-    }
-    
     // VIS : amorce 1900 Hz, front vers le bit de start 1200 Hz (repère), 7 bits
     // de 30 ms poids faible en premier (1100 Hz = 1, 1300 Hz = 0), parité paire,
     // stop 1200 Hz. L'image commence à la fin du stop (repère + 300 ms).
     // Repères examinés de 'from' à 'to' (échantillons). Résultat ou null.
+    // Décalage de fréquence toléré jusqu'à ±250 Hz : mesuré sur l'amorce,
+    // il sert de référence au reste de l'en-tête (méthode de slowrx).
     function findVIS(track, from, to, off, logFn) {
         const spm = track.rate / 1000;
         const step = Math.max(1, Math.floor(spm));
@@ -1041,8 +791,8 @@
         for (let e = first; e < last; e += step) {
             // Amorce avant, bit de start après (tri grossier par moyennes)
             const lead = track.mean(e - 250 * spm, e - 20 * spm);
-            if (Math.abs(lead - 1900 - off) > 100) continue;
-            if (Math.abs(track.mean(e + 5 * spm, e + 25 * spm) - 1200 - off) > 200) continue;
+            if (Math.abs(lead - 1900 - off) > 250) continue;
+            if (Math.abs(track.mean(e + 5 * spm, e + 25 * spm) - (lead - 700)) > 200) continue;
             
             // Front précis amorce -> start : plus forte chute de fréquence
             // moyenne entre 5 ms avant et 5 ms après
@@ -1053,8 +803,10 @@
             }
             if (edge < 0) continue;
             
-            // Décisions par médianes : start, 7 bits + parité, stop
-            const med = (i0, i1) => track.median(edge + i0 * spm, edge + i1 * spm) - off;
+            // Décisions par médianes, rapportées au décalage mesuré sur l'amorce
+            const shift = track.median(edge - 250 * spm, edge - 20 * spm) - 1900;
+            if (Math.abs(shift - off) > 250) continue;
+            const med = (i0, i1) => track.median(edge + i0 * spm, edge + i1 * spm) - shift;
             if (Math.abs(med(5, 25) - 1200) > 100) continue;
             const bits = [];
             let valid = true;
@@ -1077,18 +829,9 @@
             const imageStart = Math.round(edge + 300 * spm);
             logFn(`VIS start bit at ${(edge / track.rate).toFixed(4)}s, bits ${bits.slice(0, 7).join('')} parity ${bits[7]}`);
             logFn(`VIS code: 0x${visCode.toString(16).toUpperCase()} (${visCode})`);
-            return { visCode, imageStart, leaderStart: Math.round(edge - 610 * spm) };
+            return { visCode, imageStart, edge, bits, shift, leaderStart: Math.round(edge - 610 * spm) };
         }
         return null;
-    }
-    
-    function detectVIS() {
-        const track = getFileTrack();
-        log('Searching for VIS code...');
-        const vis = findVIS(track, 0, track.len, dopplerOffset, log);
-        if (vis) log(`Image starts at ${(vis.imageStart / sampleRate * 1000).toFixed(2)}ms`);
-        else log('No VIS found');
-        return vis;
     }
     
     // Fin de synchro (montée 1200 -> 1500 Hz, seuil 1350 Hz, fréquence lissée
@@ -1382,210 +1125,329 @@
         const imgData = ctx.createImageData(mode.width, mode.height);
         imgData.data.set(dec.image);
         ctx.putImageData(imgData, 0, 0);
-        updateProgress(100);
+        document.getElementById('imageTitle').textContent = '2. Image décodée — ' + mode.name;
+        document.getElementById('saveBtn').disabled = false;
     }
     
     // ==========================================================================
-    // SIGNAL ANALYSIS
+    // DIAGNOSTIC DU FICHIER (repris du diagnostic 2.0)
     // ==========================================================================
     
-    function analyzeSignal() {
-        const status = document.getElementById('status');
-        const progressBar = document.getElementById('progressBar');
-        
-        progressBar.style.display = 'block';
-        status.style.display = 'block';
-        status.textContent = 'Analyzing signal...';
-        
-        setTimeout(() => {
-            try {
-                // Demodulate
-                demodulateFullAudio();
-                
-                // Estimate Doppler
-                const doppler = estimateDoppler();
-                document.getElementById('statDoppler').textContent = doppler.toFixed(1);
-                
-                // Apply Doppler correction if AFC enabled
-                if (document.getElementById('afcMode').value === 'auto') {
-                    dopplerOffset = doppler;
-                    document.getElementById('dopplerOffset').value = Math.round(doppler);
-                    log(`AFC: Applied Doppler correction of ${doppler.toFixed(1)}Hz`);
-                }
-                
-                // Detect VIS
-                const vis = detectVIS();
-                if (vis && VIS_TO_MODE[vis.visCode]) {
-                    const modeName = VIS_TO_MODE[vis.visCode];
-                    document.getElementById('statMode').textContent = SSTV_MODES[modeName].name;
-                    document.getElementById('forceMode').value = modeName;
-                } else {
-                    document.getElementById('statMode').textContent = 'Unknown';
-                }
-                
-                // Estimate SNR (rough)
-                let signalPower = 0, noisePower = 0;
-                const windowSize = 100;
-                for (let i = 0; i < audioData.length - windowSize; i += windowSize) {
-                    let sum = 0, sumSq = 0;
-                    for (let j = 0; j < windowSize; j++) {
-                        const v = audioData[i + j];
-                        sum += v;
-                        sumSq += v * v;
-                    }
-                    const mean = sum / windowSize;
-                    const variance = sumSq / windowSize - mean * mean;
-                    signalPower += sumSq / windowSize;
-                    noisePower += variance * 0.1; // Rough estimate
-                }
-                const snr = 10 * Math.log10(signalPower / (noisePower + 0.0001));
-                document.getElementById('statSNR').textContent = snr.toFixed(1);
-                
-                // Draw spectrogram
-                drawSpectrogram();
-                
-                status.textContent = 'Analysis complete';
-                updateProgress(100);
-                
-            } catch (err) {
-                showError('Analysis error: ' + err.message);
-                console.error(err);
-            }
-        }, 100);
+    let diagTrack = null;     // piste de fréquence du fichier
+    let diagResult = null;    // dernières mesures
+    let markA = null, markB = null;
+    const T = {
+            subtitle: 'Version 2.0 — analyse d\'un enregistrement WAV',
+            h_file: '1. Fichier WAV',
+            h_results: '2. Mesures',
+            h_drift: '3. Écart des synchros au rythme nominal (ms), droite mesurée',
+            h_freq: '4. Fréquence instantanée (cliquer pour mesurer)',
+            mode_label: 'Mode : ',
+            mode_auto: 'Automatique (VIS)',
+            zoom: 'Zoom',
+            position: 'Position',
+            file_info: (r, ch, bits, d) => `${r} Hz, ${ch} voie(s), ${bits} bits, ${d} s`,
+            no_vis: 'VIS non trouvé : choisir le mode.',
+            no_sync: 'Pas assez de synchros trouvées pour mesurer l\'horloge.',
+            col_item: 'Mesure', col_meas: 'Mesuré', col_nom: 'Nominal',
+            vis_code: 'Code VIS', vis_none: 'non trouvé',
+            vis_start: 'Bit de start du VIS', image_start: 'Début d\'image',
+            leader: 'Fréquence de l\'amorce', mode: 'Mode',
+            syncs: 'Synchros trouvées / attendues', syncs_used: 'Synchros retenues pour la droite',
+            period: 'Période de ligne', clock: 'Écart d\'horloge',
+            drift: 'Dérive cumulée sur l\'image au rythme nominal',
+            pixels: 'pixels', resid: 'Écart des synchros à la droite (max / efficace)',
+            sync_len: 'Durée de synchro (médiane)', sync_freq: 'Fréquence de synchro (médiane)',
+            image_len: 'Durée de l\'image',
+            meas_a: 'A :', meas_b: 'B :', meas_d: 'Δt =',
+            afc: 'Décalage de fréquence corrigé (AFC)'
+    };
+    
+    // Début de synchro : front descendant pris à mi-chemin entre le niveau qui
+    // précède et 1200 Hz (même critère que la fin de synchro, 1350 Hz étant
+    // le milieu entre 1200 et le palier à 1500 Hz) : durée sans biais de lissage
+    function findSyncStart(pos, syncMs, off = 0) {
+        const spm = diagTrack.rate / 1000, h = 0.4 * spm;
+        let s1 = -1;
+        for (let i = pos - 0.5 * spm; i > pos - 2 * syncMs * spm; i -= 1) {
+            if (diagTrack.mean(i - h, i + h) >= 1350 + off) { s1 = i; break; }
+        }
+        if (s1 < 0) return -1;
+        const before = diagTrack.median(s1 - 1.5 * spm, s1 - 0.3 * spm);
+        const thr = (before + 1200 + off) / 2;
+        let prev = diagTrack.mean(s1 + 1.5 * spm - h, s1 + 1.5 * spm + h);
+        for (let i = s1 + 1.5 * spm - 1; i > s1 - 1.5 * spm; i -= 1) {
+            const cur = diagTrack.mean(i - h, i + h);
+            if (cur >= thr && prev < thr) return i + (cur - thr) / (cur - prev);
+            prev = cur;
+        }
+        return s1;
     }
     
-    // ==========================================================================
-    // MAIN DECODE HANDLER
-    // ==========================================================================
+    const median = v => { if (!v.length) return NaN; const s = [...v].sort((a, b) => a - b); return s[s.length >> 1]; };
     
-    function handleDecode() {
+    // Mesures sur le fichier, AFC, puis décodage
+    function runFile() {
         if (!audioData) return;
+        diagTrack = getFileTrack();
+        const choice = document.getElementById('forceMode').value;
+        const vis = findVIS(diagTrack, 0, diagTrack.len, 0, () => {});
+        const modeName = choice === 'auto' ? (vis && VIS_TO_MODE[vis.visCode]) : choice;
+        showStatus('');
+        diagResult = { vis, modeName };
+        dopplerOffset = 0;
         
-        const progressBar = document.getElementById('progressBar');
-        const status = document.getElementById('status');
-        const errorDiv = document.getElementById('error');
-        
-        progressBar.style.display = 'block';
-        status.style.display = 'block';
-        errorDiv.style.display = 'none';
-        
-        // Get manual Doppler offset
-        dopplerOffset = parseFloat(document.getElementById('dopplerOffset').value) || 0;
-        
-        status.textContent = 'Demodulating...';
-        
-        setTimeout(() => {
-            try {
-                // Demodulate if not already done
-                if (!demodulatedFreq) {
-                    demodulateFullAudio();
-                }
-                
-                // Mode : VIS, ou mode forcé (début calé sur le VIS ou sur les synchros)
-                let modeName = document.getElementById('forceMode').value;
-                const vis = detectVIS();
-                let imageStart;
-                if (modeName === 'auto') {
-                    if (!vis || !VIS_TO_MODE[vis.visCode]) throw new Error('VIS non détecté : choisir le mode');
-                    modeName = VIS_TO_MODE[vis.visCode];
-                    imageStart = vis.imageStart;
-                } else {
-                    imageStart = vis ? vis.imageStart : findImageStart(getFileTrack(), modeName, 0, dopplerOffset);
-                }
-                
-                status.textContent = `Decoding ${SSTV_MODES[modeName].name}...`;
-                decodeFileImage(modeName, imageStart);
-                
-                status.textContent = '✓ Decode complete';
-                document.getElementById('saveBtn').disabled = false;
-                
-            } catch (err) {
-                showError('Decode error: ' + err.message);
-                console.error(err);
+        if (!modeName) {
+            showStatus(T.no_vis);
+            clearImage();
+        } else {
+            // AFC : décalage de l'amorce du VIS, affiné sur les synchros (1200 Hz)
+            const off0 = vis ? vis.shift : 0;
+            measureSyncs(modeName, vis, off0);
+            if (diagResult.fit && Math.abs(diagResult.syncFreq - 1200 - off0) >= 20) {
+                measureSyncs(modeName, vis, diagResult.syncFreq - 1200);
             }
-        }, 100);
+            dopplerOffset = diagResult.fit ? diagResult.syncFreq - 1200 : 0;
+            diagResult.afc = dopplerOffset;
+            if (!diagResult.fit) showStatus(T.no_sync);
+            decodeFileImage(modeName, diagResult.start);
+        }
+        drawResults();
+        drawDrift();
+        drawFreq();
+    }
+    
+    function clearImage() {
+        const c = document.getElementById('canvas');
+        c.getContext('2d').clearRect(0, 0, c.width, c.height);
+        document.getElementById('imageTitle').textContent = '2. Image décodée';
+        document.getElementById('saveBtn').disabled = true;
+    }
+    
+    // Fins de synchro suivies comme dans le décodeur, puis droite des moindres carrés
+    function measureSyncs(modeName, vis, off) {
+        const m = SSTV_MODES[modeName], L = modeLayout(m);
+        const spm = diagTrack.rate / 1000, Tn = L.period * spm;
+        const start = vis ? vis.imageStart : findImageStart(diagTrack, modeName, 0, off);
+        const all = [];
+        let recent = [], lastFound = -100, expected = start + L.firstSyncEnd * spm;
+        for (let n = 0; n < L.syncs && expected < diagTrack.len; n++) {
+            const locked = n - lastFound <= 3;
+            const pos = findSyncEnd(diagTrack, expected, locked ? 4 : L.period / 2, m.syncMs, off);
+            if (pos >= 0) {
+                if (!locked) recent = [];
+                recent.push([n, pos]); all.push([n, pos]);
+                lastFound = n;
+            }
+            if (recent.length >= 8) {
+                const f = fitLine(recent, spm);
+                expected = f.a + f.b * (n + 1);
+            } else {
+                expected = (pos >= 0 ? pos : expected) + Tn;
+            }
+        }
+        diagResult = { vis: diagResult.vis, modeName, mode: m, layout: L, start, points: all, syncsExpected: L.syncs };
+        if (all.length < 8) return;
+        const f = fitLine(all, spm);
+        const used = all.filter(([x, y]) => Math.abs(y - (f.a + f.b * x)) < spm);
+        const res = used.map(([x, y]) => (y - (f.a + f.b * x)) / spm);
+        const durs = [], freqs = [];
+        for (const [n, pos] of all) {
+            if (n === 0) continue;                      // première synchro collée au stop du VIS
+            const s0 = findSyncStart(pos, m.syncMs, off);
+            if (s0 >= 0) durs.push((pos - s0) / spm);
+            freqs.push(diagTrack.mean(pos - (m.syncMs - 1) * spm, pos - 1 * spm));
+        }
+        Object.assign(diagResult, {
+            fit: f, used: used.length,
+            periodMs: f.b / spm,
+            ppm: (f.b / Tn - 1) * 1e6,
+            driftMs: (f.b - Tn) / spm * (L.syncs - 1),
+            residMax: Math.max(...res.map(Math.abs)),
+            residRms: Math.sqrt(res.reduce((a, r) => a + r * r, 0) / res.length),
+            syncLen: median(durs), syncFreq: median(freqs),
+            imageMs: f.b / spm * L.syncs, pxMs: m.scanMs / m.width
+        });
     }
     
     // ==========================================================================
-    // VISUALIZATION
+    // AFFICHAGE
     // ==========================================================================
     
-    function drawWaveform() {
-        const canvas = document.getElementById('waveformCanvas');
-        const ctx = canvas.getContext('2d');
-        const width = canvas.width;
-        const height = canvas.height;
-        
-        ctx.fillStyle = '#000';
-        ctx.fillRect(0, 0, width, height);
-        
-        // Draw waveform
-        ctx.strokeStyle = '#00ff00';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        
-        const step = Math.floor(audioData.length / width);
-        for (let x = 0; x < width; x++) {
-            const idx = x * step;
-            const y = height / 2 - audioData[idx] * height / 2;
-            if (x === 0) ctx.moveTo(x, y);
-            else ctx.lineTo(x, y);
+    const fmt = (v, d) => (v === undefined || v === null || isNaN(v)) ? '—' : v.toFixed(d);
+    const ms = i => i / diagTrack.rate * 1000;
+    
+    function drawResults() {
+        const r = diagResult, rows = [];
+        const add = (label, meas, nom) => rows.push(`<tr><td>${label}</td><td class="num">${meas}</td><td class="num">${nom ?? ''}</td></tr>`);
+        if (r.vis) {
+            add(T.vis_code, `0x${r.vis.visCode.toString(16).toUpperCase()} (${r.vis.visCode})`, VIS_TO_MODE[r.vis.visCode] ? SSTV_MODES[VIS_TO_MODE[r.vis.visCode]].name : '?');
+            add(T.vis_start, fmt(ms(r.vis.edge), 2) + ' ms');
+            add(T.leader, fmt(diagTrack.mean(r.vis.edge - 250 * diagTrack.rate / 1000, r.vis.edge - 20 * diagTrack.rate / 1000), 1) + ' Hz', '1900 Hz');
+        } else {
+            add(T.vis_code, T.vis_none);
         }
-        ctx.stroke();
-        
-        // Time axis
-        ctx.fillStyle = '#666';
-        ctx.font = '10px monospace';
-        const duration = audioData.length / sampleRate;
-        for (let t = 0; t <= duration; t += 30) {
-            const x = (t / duration) * width;
-            ctx.fillText(t + 's', x, height - 2);
+        if (r.mode) {
+            const L = r.layout;
+            add(T.mode, r.mode.name);
+            add(T.image_start, fmt(ms(r.start), 2) + ' ms');
+            add(T.syncs, `${r.points.length} / ${r.syncsExpected}`);
+            if (r.fit) {
+                add(T.syncs_used, `${r.used}`);
+                add(T.period, fmt(r.periodMs, 4) + ' ms', fmt(L.period, 4) + ' ms');
+                add(T.clock, fmt(r.ppm, 0) + ' ppm', '0 ppm');
+                add(T.drift, `${fmt(r.driftMs, 2)} ms (${fmt(r.driftMs / r.pxMs, 1)} ${T.pixels})`, '0 ms');
+                add(T.resid, `${fmt(r.residMax, 3)} / ${fmt(r.residRms, 3)} ms`, '0 ms');
+                add(T.sync_len, fmt(r.syncLen, 2) + ' ms', fmt(r.mode.syncMs, 3) + ' ms');
+                add(T.sync_freq, fmt(r.syncFreq, 1) + ' Hz', '1200 Hz');
+                add(T.afc, fmt(r.afc, 1) + ' Hz', '0 Hz');
+                add(T.image_len, fmt(r.imageMs / 1000, 3) + ' s', fmt(L.period * L.syncs / 1000, 3) + ' s');
+            }
         }
+        document.getElementById('results').innerHTML =
+            `<tr><th>${T.col_item}</th><th>${T.col_meas}</th><th>${T.col_nom}</th></tr>` + rows.join('');
     }
     
-    function drawSpectrogram() {
-        if (!demodulatedFreq) return;
-        
-        const canvas = document.getElementById('spectrogramCanvas');
-        const ctx = canvas.getContext('2d');
-        const width = canvas.width;
-        const height = canvas.height;
-        
+    // Pas de graduation 1, 2 ou 5 × 10^n supérieur ou égal à raw
+    function niceStep(raw) {
+        const p = Math.pow(10, Math.floor(Math.log10(raw)));
+        const r = raw / p;
+        return p * (r <= 1 ? 1 : r <= 2 ? 2 : r <= 5 ? 5 : 10);
+    }
+    
+    function prepCanvas(id) {
+        const c = document.getElementById(id);
+        c.width = Math.max(300, c.clientWidth || 1000);
+        const ctx = c.getContext('2d');
         ctx.fillStyle = '#000';
-        ctx.fillRect(0, 0, width, height);
-        
-        // Draw frequency trace
-        ctx.strokeStyle = '#00ffff';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        
-        const step = Math.floor(demodulatedFreq.length / width);
-        for (let x = 0; x < width; x++) {
-            const idx = x * step;
-            const freq = demodulatedFreq[idx];
-            // Map 1100-2400Hz to height
-            const y = height - ((freq - 1100) / 1300) * height;
-            if (x === 0) ctx.moveTo(x, y);
-            else ctx.lineTo(x, y);
+        ctx.fillRect(0, 0, c.width, c.height);
+        ctx.font = '11px monospace';
+        return { c, ctx, w: c.width, h: c.height };
+    }
+    
+    // Écart de chaque synchro au rythme nominal depuis la première ; la pente
+    // de la droite mesurée est l'écart d'horloge
+    function drawDrift() {
+        const { ctx, w, h } = prepCanvas('driftCanvas');
+        const r = diagResult;
+        if (!r || !r.points || r.points.length < 2) return;
+        const spm = diagTrack.rate / 1000, Tn = r.layout.period * spm;
+        const [n0, p0] = r.points[0];
+        const pts = r.points.map(([n, p]) => [n, (p - p0 - (n - n0) * Tn) / spm]);
+        let lo = Math.min(-1, ...pts.map(q => q[1])), hi = Math.max(1, ...pts.map(q => q[1]));
+        if (r.fit) {
+            for (const n of [0, r.syncsExpected - 1]) {
+                const d = (r.fit.a + r.fit.b * n - p0 - (n - n0) * Tn) / spm;
+                lo = Math.min(lo, d); hi = Math.max(hi, d);
+            }
         }
-        ctx.stroke();
+        const pad = (hi - lo) * 0.1; lo -= pad; hi += pad;
+        const X = n => 40 + n / Math.max(1, r.syncsExpected - 1) * (w - 50);
+        const Y = v => h - 20 - (v - lo) / (hi - lo) * (h - 30);
         
-        // Frequency guides
-        ctx.strokeStyle = '#333';
-        ctx.setLineDash([5, 5]);
-        ctx.fillStyle = '#666';
-        ctx.font = '10px monospace';
+        // Grille
+        ctx.strokeStyle = '#222'; ctx.fillStyle = '#666';
+        const step = niceStep((hi - lo) / 5);
+        for (let v = Math.ceil(lo / step) * step; v <= hi; v += step) {
+            ctx.beginPath(); ctx.moveTo(40, Y(v)); ctx.lineTo(w, Y(v)); ctx.stroke();
+            ctx.fillText(+v.toFixed(3) + '', 2, Y(v) + 4);
+        }
+        ctx.strokeStyle = '#555';
+        ctx.beginPath(); ctx.moveTo(40, Y(0)); ctx.lineTo(w, Y(0)); ctx.stroke();
         
-        const freqGuides = [1200, 1500, 1900, 2300];
-        for (const f of freqGuides) {
-            const y = height - ((f - 1100) / 1300) * height;
+        // Droite mesurée
+        if (r.fit) {
+            ctx.strokeStyle = '#00ffff';
             ctx.beginPath();
-            ctx.moveTo(0, y);
-            ctx.lineTo(width, y);
+            for (const n of [0, r.syncsExpected - 1]) {
+                const d = (r.fit.a + r.fit.b * n - p0 - (n - n0) * Tn) / spm;
+                n === 0 ? ctx.moveTo(X(n), Y(d)) : ctx.lineTo(X(n), Y(d));
+            }
             ctx.stroke();
-            ctx.fillText(f + 'Hz', 5, y - 2);
         }
-        ctx.setLineDash([]);
+        // Synchros
+        ctx.fillStyle = '#00ff00';
+        for (const [n, d] of pts) ctx.fillRect(X(n) - 1, Y(d) - 1, 3, 3);
+        ctx.fillStyle = '#666';
+        ctx.fillText('0', X(0), h - 5);
+        ctx.fillText(String(r.syncsExpected - 1), X(r.syncsExpected - 1) - 24, h - 5);
+    }
+    
+    // Fenêtre visible du tracé de fréquence (indices)
+    function view() {
+        const total = diagTrack.len;
+        const zoom = Math.pow(10, document.getElementById('zoomRange').value / 50);
+        const span = Math.max(50, Math.floor(total / zoom));
+        const first = Math.floor(document.getElementById('offsetRange').value / 1000 * (total - span));
+        document.getElementById('zoomLabel').textContent = zoom.toFixed(1) + 'x';
+        return { first, span };
+    }
+    
+    function drawFreq() {
+        const { ctx, w, h } = prepCanvas('freqCanvas');
+        if (!diagTrack) return;
+        const { first, span } = view();
+        const Y = f => h - 15 - (f - 1000) / 1500 * (h - 20);
+        const X = i => (i - first) / span * w;
+        
+        ctx.strokeStyle = '#222'; ctx.fillStyle = '#555';
+        for (const f of [1100, 1200, 1300, 1500, 1900, 2300]) {
+            ctx.beginPath(); ctx.moveTo(0, Y(f)); ctx.lineTo(w, Y(f)); ctx.stroke();
+            ctx.fillText(f + ' Hz', 3, Y(f) - 2);
+        }
+        
+        // Repères : fins de synchro (si lisibles), bit de start du VIS, début d'image
+        const vline = (i, color) => {
+            if (i < first || i > first + span) return;
+            ctx.strokeStyle = color; ctx.beginPath(); ctx.moveTo(X(i), 0); ctx.lineTo(X(i), h); ctx.stroke();
+        };
+        if (diagResult && diagResult.points) {
+            const inView = diagResult.points.filter(([, p]) => p >= first && p <= first + span);
+            if (inView.length <= 40) for (const [, p] of inView) vline(p, '#553300');
+        }
+        if (diagResult && diagResult.vis) vline(diagResult.vis.edge, '#ff00ff');
+        if (diagResult && diagResult.start !== undefined) vline(diagResult.start, '#ffff00');
+        
+        // Fréquence : enveloppe min / max par colonne
+        ctx.strokeStyle = '#00ffff';
+        ctx.beginPath();
+        for (let x = 0; x < w; x++) {
+            const a = Math.floor(first + x * span / w) - diagTrack.base;
+            const b = Math.max(a + 1, Math.floor(first + (x + 1) * span / w) - diagTrack.base);
+            let lo = Infinity, hi = -Infinity;
+            for (let i = a; i < b && i < diagTrack.n; i++) { const f = diagTrack.f[i]; if (f < lo) lo = f; if (f > hi) hi = f; }
+            if (lo === Infinity) break;
+            ctx.moveTo(x + 0.5, Y(hi)); ctx.lineTo(x + 0.5, Y(lo) + 1);
+        }
+        ctx.stroke();
+        
+        // Mesures A et B
+        for (const [mk, color, name] of [[markA, '#ffffff', 'A'], [markB, '#ff8800', 'B']]) {
+            if (!mk) continue;
+            vline(mk.i, color);
+            ctx.fillStyle = color; ctx.fillText(name, X(mk.i) + 3, 12);
+        }
+        
+        // Axe des temps
+        ctx.fillStyle = '#666';
+        const t0 = ms(first), t1 = ms(first + span);
+        const st = niceStep((t1 - t0) / Math.max(2, Math.floor(w / 110)));
+        for (let t = Math.ceil(t0 / st) * st; t < t1; t += st) ctx.fillText(+t.toFixed(3) + ' ms', (t - t0) / (t1 - t0) * w + 2, h - 3);
+    }
+    
+    // Clic : repère A, puis B, puis A…
+    function measureAt(clientX) {
+        if (!diagTrack) return;
+        const c = document.getElementById('freqCanvas');
+        const rect = c.getBoundingClientRect();
+        const { first, span } = view();
+        const i = Math.round(first + (clientX - rect.left) / rect.width * span);
+        const f = diagTrack.mean(i - 0.25 * diagTrack.rate / 1000, i + 0.25 * diagTrack.rate / 1000);
+        if (!markA || markB) { markA = { i, f }; markB = null; } else markB = { i, f };
+        let txt = `${T.meas_a} ${fmt(ms(markA.i), 3)} ms, ${fmt(markA.f, 0)} Hz`;
+        if (markB) txt += ` — ${T.meas_b} ${fmt(ms(markB.i), 3)} ms, ${fmt(markB.f, 0)} Hz — ${T.meas_d} ${fmt(ms(markB.i - markA.i), 3)} ms`;
+        document.getElementById('measure').textContent = txt;
+        drawFreq();
     }
     
     // ==========================================================================
