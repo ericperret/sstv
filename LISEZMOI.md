@@ -3,7 +3,7 @@
   Objet    : Présentation du dépôt sstv (émission, réception et diagnostic SSTV)
   Auteur   : Eric PERRET
   Date     : 2026-10-17
-  Version  : 1.5
+  Version  : 1.6
   Licence  : CC BY-NC 4.0
 -->
 
@@ -74,6 +74,7 @@ La SSTV sert aux radioamateurs pour transmettre des images en HF / VHF. Ces outi
 | 2026-10-17 | Décodeur 1.3 : micro laissé dans ses réglages par défaut (traitements du navigateur coupés sur demande), jauge de niveau en dBFS, enregistrement de la capture micro en WAV |
 | 2026-10-17 | Décodeur 1.4 : aucun journal affiché ; onglet micro épuré : Robot36 seul, démarrage sur les synchros (VIS facultatif), bouton tactile des traitements audio utilisable pendant la capture, jauge -90 à 0 dBFS, enregistrement de la capture sous l'image |
 | 2026-10-17 | Décodeur 1.5 : réception micro lancée au clic sur START sans attendre VIS ni synchro, en continu jusqu'à STOP (les images s'enchaînent), accrochage sur la première synchro trouvée ; un VIS Robot36 recale l'image en haut |
+| 2026-10-17 | Décodeur 1.6 : micro avec annulation d'écho et réduction de bruit coupées, préampli (gain automatique) actif avec un bouton pour le couper ; téléchargement PNG et WAV corrigé sur Chrome Android |
 
 ## Licence
 

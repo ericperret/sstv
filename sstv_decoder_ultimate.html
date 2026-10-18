@@ -6,7 +6,7 @@
                détection VIS, PLL, AFC, correction Doppler et d'inclinaison,
                modes Robot, Martin, Scottie, PD ; export PNG
   Auteur     : Eric PERRET
-  Version    : 1.5
+  Version    : 1.6
   Date       : 2026-10-17
   Plateforme : HTML / CSS / JavaScript, Web Audio, fichier unique, aucune librairie
   Historique :
@@ -40,13 +40,17 @@
                      de 240 lignes enchaîne sur la suivante) ; accrochage sur
                      la première synchro trouvée, puis suivi ±4 ms ; un VIS
                      Robot36 recale l'image en haut
+    1.6 (2026-10-17) micro : annulation d'écho et réduction de bruit coupées,
+                     préampli (gain automatique) actif, bouton pour le couper ;
+                     PNG et WAV téléchargés par Blob (Chrome Android), bouton
+                     PNG actif dès le départ
 ================================================================================
 -->
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Décodeur SSTV v1.5</title>
+    <title>Décodeur SSTV v1.6</title>
     <style>
         body {
             font-family: 'Consolas', 'Monaco', monospace;
@@ -272,7 +276,7 @@
 <body>
     <div class="container">
         <h1>📡 SSTV Decoder Ultimate</h1>
-        <p class="subtitle">Version 1.5 — Fichier WAV et micro en direct</p>
+        <p class="subtitle">Version 1.6 — Fichier WAV et micro en direct</p>
         
         <!-- TABS -->
         <div class="tabs" style="display:flex;gap:5px;margin-bottom:15px;">
@@ -387,7 +391,7 @@
                 <button id="stopLiveBtn" disabled style="padding:15px 30px;font-size:16px;border-color:#ff4444;color:#ff4444;">■ STOP</button>
             </div>
             <div style="text-align:center;margin-bottom:12px;">
-                <button id="liveRawBtn" class="toggle-btn" aria-pressed="false">Traitements audio : actifs</button>
+                <button id="liveRawBtn" class="toggle-btn" aria-pressed="false">Préampli : actif</button>
             </div>
             <div class="level-wrap">
                 <div class="level-zone"></div>
@@ -405,7 +409,7 @@
                 <div class="progress-fill" id="liveProgressFill"></div>
             </div>
             <div style="text-align:center;margin-top:10px;">
-                <button id="liveSaveBtn" disabled style="border-color:#00ffff;color:#00ffff;">💾 Sauvegarder PNG</button>
+                <button id="liveSaveBtn" style="border-color:#00ffff;color:#00ffff;">💾 Sauvegarder PNG</button>
                 <button id="liveClearBtn">🗑️ Effacer</button>
                 <button id="liveRecordBtn" disabled>⏺ Enregistrer la capture</button>
             </div>
@@ -1803,12 +1807,23 @@
     // SAVE IMAGE
     // ==========================================================================
     
+    // Téléchargement d'un canvas en PNG (Blob + lien rattaché au document)
+    function downloadCanvas(canvas, name) {
+        canvas.toBlob(blob => {
+            if (!blob) return;
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = name;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 10000);
+        }, 'image/png');
+    }
+    
     function saveImage() {
-        const canvas = document.getElementById('canvas');
-        const link = document.createElement('a');
-        link.download = `sstv_decoded_${Date.now()}.png`;
-        link.href = canvas.toDataURL('image/png');
-        link.click();
+        downloadCanvas(document.getElementById('canvas'), `sstv_decoded_${Date.now()}.png`);
     }
     
     // ==========================================================================
@@ -1929,7 +1944,7 @@
     let liveState = 'idle';
     const liveDopplerOffset = 0;
     const LIVE_MODE = 'robot36';  // réception micro : Robot36 seul
-    let liveRaw = false;          // traitements audio du navigateur coupés
+    let liveNoPreamp = false;     // gain automatique (préampli) coupé
     let liveSource = null;
     const liveJournal = [];       // mémoire interne, jamais affichée
     let liveVisFrom = 0;
@@ -1984,15 +1999,16 @@
         liveStartImage(LIVE_MODE, 0, false);
     }
     
-    // Ouverture du micro (réglages par défaut, ou traitements coupés sur demande)
+    // Ouverture du micro : annulation d'écho et réduction de bruit coupées,
+    // préampli (gain automatique) actif sauf demande
     async function openMic() {
         liveMediaStream = await navigator.mediaDevices.getUserMedia({
-            audio: liveRaw ? { echoCancellation: false, noiseSuppression: false, autoGainControl: false } : true
+            audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: !liveNoPreamp }
         });
         liveSource = liveAudioContext.createMediaStreamSource(liveMediaStream);
         liveSource.connect(liveAnalyserNode);
         liveSource.connect(liveTapNode);
-        liveLog(liveRaw ? 'Traitements audio coupés' : 'Micro par défaut');
+        liveLog(liveNoPreamp ? 'Préampli coupé' : 'Préampli actif');
     }
     
     function closeMic() {
@@ -2001,10 +2017,10 @@
     }
     
     async function toggleLiveRaw() {
-        liveRaw = !liveRaw;
+        liveNoPreamp = !liveNoPreamp;
         const btn = document.getElementById('liveRawBtn');
-        btn.setAttribute('aria-pressed', liveRaw ? 'true' : 'false');
-        btn.textContent = liveRaw ? 'Traitements audio : coupés' : 'Traitements audio : actifs';
+        btn.setAttribute('aria-pressed', liveNoPreamp ? 'true' : 'false');
+        btn.textContent = liveNoPreamp ? 'Préampli : coupé' : 'Préampli : actif';
         if (liveAudioContext) {
             closeMic();
             try { await openMic(); } catch (err) { console.error(err); stopLiveAudio(); }
@@ -2230,7 +2246,6 @@
         ctx.fillStyle = '#000';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         document.getElementById('liveProgressFill').style.width = '0%';
-        document.getElementById('liveSaveBtn').disabled = true;
         if (liveImageData) liveImageData.data.fill(0);
         if (liveImageData) for (let i = 3; i < liveImageData.data.length; i += 4) liveImageData.data[i] = 255;
         if (liveState === 'receiving' && liveRx) {
@@ -2240,11 +2255,7 @@
     }
     
     function saveLiveImage() {
-        const canvas = document.getElementById('liveCanvas');
-        const link = document.createElement('a');
-        link.download = 'sstv_live_' + Date.now() + '.png';
-        link.href = canvas.toDataURL('image/png');
-        link.click();
+        downloadCanvas(document.getElementById('liveCanvas'), `sstv_live_${Date.now()}.png`);
     }
     
     // ==========================================================================
@@ -2298,8 +2309,9 @@
         const name = `capture_micro_${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}_${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}.wav`;
         const url = URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
         const a = document.createElement('a');
-        a.href = url; a.download = name; a.click();
-        setTimeout(() => URL.revokeObjectURL(url), 5000);
+        a.href = url; a.download = name;
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 10000);
         
         liveLog(`Capture sauvegardée : ${name}`);
     }
