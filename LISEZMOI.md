@@ -86,6 +86,7 @@ La SSTV sert aux radioamateurs pour transmettre des images en HF / VHF. Ces outi
 | 2026-10-18 | Approuvé : émetteur 4.2, décodeur 1.8 |
 | 2026-10-18 | En cours dans dev/ : décodeur 1.9, micro avec tous les traitements du navigateur coupés, gain automatique (préampli) compris ; bouton Préampli supprimé |
 | 2026-10-18 | En cours dans dev/ : décodeur 1.10, variante N&B de chaque mode (même signal, luminance seule : Y transmis pour Robot et PD, luminance BT.601 des voies R, V, B pour Martin et Scottie), chaque mode suivi de sa variante N&B au toucher de l'image, variantes N&B dans le sélecteur du mode fichier ; émetteur 4.3, « Robot36 N&B » non standard retiré |
+| 2026-10-18 | En cours dans dev/ : décodeur 1.11, état du micro vérifié sans demande d'autorisation : START grisé si micro absent, accès refusé ou page non sécurisée, raison affichée au clic et en cas d'échec au démarrage ; capture par ScriptProcessor si l'AudioWorklet ne se charge pas (page ouverte en fichier local) |
 
 ## Licence
 

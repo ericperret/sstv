@@ -86,6 +86,7 @@ SSTV is used by radio amateurs to send images over HF / VHF. These tools let you
 | 2026-10-18 | Approved: transmitter 4.2, decoder 1.8 |
 | 2026-10-18 | In progress in dev/: decoder 1.9, microphone with all browser processing off, automatic gain (preamp) included; preamp button removed |
 | 2026-10-18 | In progress in dev/: decoder 1.10, B&W variant of every mode (same signal, luminance only: transmitted Y for Robot and PD, BT.601 luminance of R, G, B for Martin and Scottie), each mode followed by its B&W variant when tapping the image, B&W variants in the file mode selector; transmitter 4.3, non-standard "Robot36 B&W" removed |
+| 2026-10-18 | In progress in dev/: decoder 1.11, microphone state checked without a permission prompt: START greyed out when no microphone, access denied or non-secure page, reason shown on click and on start failure; capture falls back to ScriptProcessor when the AudioWorklet cannot load (page opened as a local file) |
 
 ## License
 

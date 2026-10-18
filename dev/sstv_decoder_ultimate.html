@@ -6,7 +6,7 @@
                détection VIS, PLL, AFC, correction Doppler et d'inclinaison,
                modes Robot, Martin, Scottie, PD ; export PNG
   Auteur     : Eric PERRET
-  Version    : 1.10
+  Version    : 1.11
   Date       : 2026-10-17
   Plateforme : HTML / CSS / JavaScript, Web Audio, fichier unique, aucune librairie
   Historique :
@@ -67,13 +67,19 @@
                      Scottie) ; au micro, chaque mode est suivi de sa variante
                      N&B au toucher de l'image ; en fichier, variantes dans
                      le sélecteur de mode
+    1.11 (2026-10-18) état du micro vérifié sans demande d'autorisation :
+                     bouton START grisé si le micro est absent, refusé ou
+                     la page non sécurisée, raison affichée au clic ; raison
+                     affichée aussi en cas d'échec au démarrage ; capture
+                     par ScriptProcessor si l'AudioWorklet ne se charge pas
+                     (page ouverte en fichier local)
 ================================================================================
 -->
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Décodeur SSTV v1.10</title>
+    <title>Décodeur SSTV v1.11</title>
     <style>
         body {
             font-family: 'Consolas', 'Monaco', monospace;
@@ -176,6 +182,7 @@
         .zoom-controls { display: flex; gap: 10px; align-items: center; margin: 10px 0; flex-wrap: wrap; }
         .zoom-controls input[type="range"] { flex: 1; min-width: 120px; accent-color: #00ff00; }
         #measure { font-size: 13px; margin-top: 8px; min-height: 1.4em; }
+        button.mic-off { opacity: 0.4; border-color: #555; color: #777; }
         .family-select {
             min-height: 48px;
             padding: 8px 16px;
@@ -264,7 +271,7 @@
 <body>
     <div class="container">
         <h1>📡 SSTV Decoder Ultimate</h1>
-        <p class="subtitle">Version 1.10 — Fichier WAV et micro en direct</p>
+        <p class="subtitle">Version 1.11 — Fichier WAV et micro en direct</p>
         
         <!-- TABS -->
         <div class="tabs" style="display:flex;gap:5px;margin-bottom:15px;">
@@ -358,6 +365,7 @@
                 <button id="startLiveBtn" style="padding:15px 30px;font-size:16px;">▶ START</button>
                 <button id="stopLiveBtn" disabled style="padding:15px 30px;font-size:16px;border-color:#ff4444;color:#ff4444;">■ STOP</button>
             </div>
+            <div id="micState" class="warn" style="display:none;text-align:center;margin:0 0 12px;"></div>
             <div style="display:flex;justify-content:center;gap:10px;flex-wrap:wrap;margin-bottom:12px;">
                 <select id="liveFamily" class="family-select">
                     <option value="robot">Robot</option>
@@ -1661,7 +1669,11 @@
     // LIVE EVENT LISTENERS
     // ==========================================================================
     
-    document.getElementById('startLiveBtn').addEventListener('click', startLiveAudio);
+    document.getElementById('startLiveBtn').addEventListener('click', onStartClick);
+    if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {
+        navigator.mediaDevices.addEventListener('devicechange', () => checkMic());
+    }
+    checkMic();
     document.getElementById('stopLiveBtn').addEventListener('click', stopLiveAudio);
     document.getElementById('liveSaveBtn').addEventListener('click', saveLiveImage);
     document.getElementById('liveClearBtn').addEventListener('click', clearLiveImage);
@@ -1725,13 +1737,21 @@
             liveAnalyserNode = liveAudioContext.createAnalyser();
             liveAnalyserNode.fftSize = 2048;
             
+            // AudioWorklet si possible ; sinon (page ouverte en fichier local,
+            // navigateur ancien) ScriptProcessor
+            liveTapNode = null;
             if (liveAudioContext.audioWorklet) {
-                const url = URL.createObjectURL(new Blob([WORKLET_SOURCE], { type: 'application/javascript' }));
-                await liveAudioContext.audioWorklet.addModule(url);
-                URL.revokeObjectURL(url);
-                liveTapNode = new AudioWorkletNode(liveAudioContext, 'sstv-tap');
-                liveTapNode.port.onmessage = e => liveFeed(e.data);
-            } else {
+                try {
+                    const url = URL.createObjectURL(new Blob([WORKLET_SOURCE], { type: 'application/javascript' }));
+                    await liveAudioContext.audioWorklet.addModule(url);
+                    URL.revokeObjectURL(url);
+                    liveTapNode = new AudioWorkletNode(liveAudioContext, 'sstv-tap');
+                    liveTapNode.port.onmessage = e => liveFeed(e.data);
+                } catch (e) {
+                    liveTapNode = null;
+                }
+            }
+            if (!liveTapNode) {
                 liveTapNode = liveAudioContext.createScriptProcessor(4096, 1, 1);
                 liveTapNode.onaudioprocess = e => liveFeed(new Float32Array(e.inputBuffer.getChannelData(0)));
             }
@@ -1749,7 +1769,58 @@
         } catch (err) {
             console.error(err);
             stopLiveAudio();
+            setMicProblem(micMessage(err), true);
         }
+    }
+    
+    // ==========================================================================
+    // ÉTAT DU MICRO : vérifié sans demander l'autorisation ; bouton START grisé
+    // (mais cliquable) et raison affichée au clic si le micro est indisponible
+    // ==========================================================================
+    
+    let micProblem = null;
+    
+    async function checkMic() {
+        let reason = null;
+        if (!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            reason = 'Micro indisponible : page non sécurisée';
+        } else {
+            try {
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                if (!devices.some(d => d.kind === 'audioinput')) reason = 'Aucun micro détecté';
+            } catch (e) { /* liste indisponible : l'essai de démarrage tranchera */ }
+            if (!reason && navigator.permissions && navigator.permissions.query) {
+                try {
+                    const perm = await navigator.permissions.query({ name: 'microphone' });
+                    if (perm.state === 'denied') reason = 'Accès au micro refusé par le navigateur';
+                    perm.onchange = () => checkMic();
+                } catch (e) { /* requête non prise en charge */ }
+            }
+        }
+        setMicProblem(reason, false);
+        return reason;
+    }
+    
+    function setMicProblem(reason, show) {
+        micProblem = reason;
+        document.getElementById('startLiveBtn').classList.toggle('mic-off', !!reason);
+        const line = document.getElementById('micState');
+        if (!reason) line.style.display = 'none';
+        else if (show) { line.textContent = reason; line.style.display = 'block'; }
+    }
+    
+    function micMessage(err) {
+        const name = err && err.name;
+        if (name === 'NotFoundError' || name === 'DevicesNotFoundError' || name === 'OverconstrainedError') return 'Aucun micro détecté';
+        if (name === 'NotAllowedError' || name === 'PermissionDeniedError' || name === 'SecurityError') return 'Accès au micro refusé par le navigateur';
+        if (name === 'NotReadableError' || name === 'TrackStartError' || name === 'AbortError') return 'Micro déjà utilisé par une autre application';
+        return 'Micro indisponible' + (err && err.message ? ' : ' + err.message : '');
+    }
+    
+    // START : nouvelle vérification, puis démarrage ou raison affichée
+    async function onStartClick() {
+        if (await checkMic()) { setMicProblem(micProblem, true); return; }
+        startLiveAudio();
     }
     
     function stopLiveAudio() {
