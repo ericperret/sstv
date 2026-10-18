@@ -6,7 +6,7 @@
                détection VIS, PLL, AFC, correction Doppler et d'inclinaison,
                modes Robot, Martin, Scottie, PD ; export PNG
   Auteur     : Eric PERRET
-  Version    : 1.8
+  Version    : 1.9
   Date       : 2026-10-17
   Plateforme : HTML / CSS / JavaScript, Web Audio, fichier unique, aucune librairie
   Historique :
@@ -59,13 +59,15 @@
                      des synchros ; boutons Analyser / Décoder, Doppler manuel,
                      estimations Doppler / SNR, forme d'onde et spectrogramme
                      supprimés
+    1.9 (2026-10-18) micro : tous les traitements du navigateur coupés, gain
+                     automatique (préampli) compris ; bouton Préampli supprimé
 ================================================================================
 -->
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Décodeur SSTV v1.8</title>
+    <title>Décodeur SSTV v1.9</title>
     <style>
         body {
             font-family: 'Consolas', 'Monaco', monospace;
@@ -173,16 +175,6 @@
             padding: 8px 16px;
             font-size: 16px;
         }
-        .toggle-btn {
-            min-height: 48px;
-            padding: 12px 20px;
-            font-size: 16px;
-            touch-action: manipulation;
-        }
-        .toggle-btn[aria-pressed="true"] {
-            background: #00ff00;
-            color: #000;
-        }
         #canvas, #liveCanvas {
             width: 100%;
             max-width: 640px;
@@ -266,7 +258,7 @@
 <body>
     <div class="container">
         <h1>📡 SSTV Decoder Ultimate</h1>
-        <p class="subtitle">Version 1.8 — Fichier WAV et micro en direct</p>
+        <p class="subtitle">Version 1.9 — Fichier WAV et micro en direct</p>
         
         <!-- TABS -->
         <div class="tabs" style="display:flex;gap:5px;margin-bottom:15px;">
@@ -356,7 +348,6 @@
                     <option value="scottie">Scottie</option>
                     <option value="pd">PD</option>
                 </select>
-                <button id="liveRawBtn" class="toggle-btn" aria-pressed="false">Préampli : actif</button>
             </div>
             <div class="level-wrap">
                 <div class="level-zone"></div>
@@ -1596,7 +1587,6 @@
     let liveModeName = 'robot36';
     let liveAnchor = 0;           // début de réception : START, effacement ou dernier VIS
     let liveDec = null;           // image en cours de décodage
-    let liveNoPreamp = false;     // gain automatique (préampli) coupé
     let liveSource = null;
     const liveJournal = [];       // mémoire interne, jamais affichée
     let liveVisFrom = 0;
@@ -1619,7 +1609,6 @@
     document.getElementById('liveSaveBtn').addEventListener('click', saveLiveImage);
     document.getElementById('liveClearBtn').addEventListener('click', clearLiveImage);
     document.getElementById('liveRecordBtn').addEventListener('click', toggleLiveRecord);
-    document.getElementById('liveRawBtn').addEventListener('click', toggleLiveRaw);
     document.getElementById('liveFamily').addEventListener('change', e => liveSetFamily(e.target.value));
     document.getElementById('liveCanvas').addEventListener('click', liveNextSubMode);
     document.addEventListener('visibilitychange', () => {
@@ -1654,32 +1643,20 @@
         liveRedecode();
     }
     
-    // Ouverture du micro : annulation d'écho et réduction de bruit coupées,
-    // préampli (gain automatique) actif sauf demande
+    // Ouverture du micro : tous les traitements du navigateur coupés
+    // (annulation d'écho, réduction de bruit, gain automatique)
     async function openMic() {
         liveMediaStream = await navigator.mediaDevices.getUserMedia({
-            audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: !liveNoPreamp }
+            audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
         });
         liveSource = liveAudioContext.createMediaStreamSource(liveMediaStream);
         liveSource.connect(liveAnalyserNode);
         liveSource.connect(liveTapNode);
-        liveLog(liveNoPreamp ? 'Préampli coupé' : 'Préampli actif');
     }
     
     function closeMic() {
         if (liveSource) { try { liveSource.disconnect(); } catch (e) {} liveSource = null; }
         if (liveMediaStream) { liveMediaStream.getTracks().forEach(t => t.stop()); liveMediaStream = null; }
-    }
-    
-    async function toggleLiveRaw() {
-        liveNoPreamp = !liveNoPreamp;
-        const btn = document.getElementById('liveRawBtn');
-        btn.setAttribute('aria-pressed', liveNoPreamp ? 'true' : 'false');
-        btn.textContent = liveNoPreamp ? 'Préampli : coupé' : 'Préampli : actif';
-        if (liveAudioContext) {
-            closeMic();
-            try { await openMic(); } catch (err) { console.error(err); stopLiveAudio(); }
-        }
     }
     
     async function startLiveAudio() {

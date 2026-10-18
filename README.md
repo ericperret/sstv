@@ -84,6 +84,7 @@ SSTV is used by radio amateurs to send images over HF / VHF. These tools let you
 | 2026-10-18 | Approved: diagnostic 2.0 |
 | 2026-10-18 | In progress in dev/: decoder 1.8, file tab with the built-in diagnostic: opening a WAV runs the measurements and decodes at once when the mode is known (VIS or chosen); automatic frequency correction (AFC) measured on the VIS leader and the sync pulses, up to ±250 Hz; Analyse / Decode buttons, manual Doppler, waveform and spectrogram removed |
 | 2026-10-18 | Approved: transmitter 4.2, decoder 1.8 |
+| 2026-10-18 | In progress in dev/: decoder 1.9, microphone with all browser processing off, automatic gain (preamp) included; preamp button removed |
 
 ## License
 
