@@ -85,6 +85,7 @@ La SSTV sert aux radioamateurs pour transmettre des images en HF / VHF. Ces outi
 | 2026-10-18 | En cours dans dev/ : décodeur 1.8, onglet fichier avec le diagnostic intégré : ouvrir un WAV lance les mesures et décode aussitôt si le mode est connu (VIS ou choisi) ; correction de fréquence automatique (AFC) mesurée sur l'amorce du VIS et les synchros, jusqu'à ±250 Hz ; boutons Analyser / Décoder, Doppler manuel, forme d'onde et spectrogramme supprimés |
 | 2026-10-18 | Approuvé : émetteur 4.2, décodeur 1.8 |
 | 2026-10-18 | En cours dans dev/ : décodeur 1.9, micro avec tous les traitements du navigateur coupés, gain automatique (préampli) compris ; bouton Préampli supprimé |
+| 2026-10-18 | En cours dans dev/ : décodeur 1.10, variante N&B de chaque mode (même signal, luminance seule : Y transmis pour Robot et PD, luminance BT.601 des voies R, V, B pour Martin et Scottie), chaque mode suivi de sa variante N&B au toucher de l'image, variantes N&B dans le sélecteur du mode fichier ; émetteur 4.3, « Robot36 N&B » non standard retiré |
 
 ## Licence
 

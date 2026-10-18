@@ -6,7 +6,7 @@
                détection VIS, PLL, AFC, correction Doppler et d'inclinaison,
                modes Robot, Martin, Scottie, PD ; export PNG
   Auteur     : Eric PERRET
-  Version    : 1.9
+  Version    : 1.10
   Date       : 2026-10-17
   Plateforme : HTML / CSS / JavaScript, Web Audio, fichier unique, aucune librairie
   Historique :
@@ -61,13 +61,19 @@
                      supprimés
     1.9 (2026-10-18) micro : tous les traitements du navigateur coupés, gain
                      automatique (préampli) compris ; bouton Préampli supprimé
+    1.10 (2026-10-18) variante N&B de chaque mode : même signal, seule la
+                     luminance affichée (Y transmis pour Robot et PD,
+                     luminance BT.601 des voies R, V, B pour Martin et
+                     Scottie) ; au micro, chaque mode est suivi de sa variante
+                     N&B au toucher de l'image ; en fichier, variantes dans
+                     le sélecteur de mode
 ================================================================================
 -->
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Décodeur SSTV v1.9</title>
+    <title>Décodeur SSTV v1.10</title>
     <style>
         body {
             font-family: 'Consolas', 'Monaco', monospace;
@@ -258,7 +264,7 @@
 <body>
     <div class="container">
         <h1>📡 SSTV Decoder Ultimate</h1>
-        <p class="subtitle">Version 1.9 — Fichier WAV et micro en direct</p>
+        <p class="subtitle">Version 1.10 — Fichier WAV et micro en direct</p>
         
         <!-- TABS -->
         <div class="tabs" style="display:flex;gap:5px;margin-bottom:15px;">
@@ -290,23 +296,34 @@
             <select id="forceMode">
                         <option value="auto">Automatique (VIS)</option>
                         <optgroup label="Robot">
-                            <option value="robot36">Robot36 Color</option>
-                            <option value="robot72">Robot72 Color</option>
+                            <option value="robot36">Robot36</option>
+                            <option value="robot36nb">Robot36 N&amp;B</option>
+                            <option value="robot72">Robot72</option>
+                            <option value="robot72nb">Robot72 N&amp;B</option>
                         </optgroup>
                         <optgroup label="Martin">
                             <option value="martinM1">Martin M1</option>
+                            <option value="martinM1nb">Martin M1 N&amp;B</option>
                             <option value="martinM2">Martin M2</option>
+                            <option value="martinM2nb">Martin M2 N&amp;B</option>
                         </optgroup>
                         <optgroup label="Scottie">
                             <option value="scottieS1">Scottie S1</option>
+                            <option value="scottieS1nb">Scottie S1 N&amp;B</option>
                             <option value="scottieS2">Scottie S2</option>
+                            <option value="scottieS2nb">Scottie S2 N&amp;B</option>
                         </optgroup>
                         <optgroup label="PD">
                             <option value="pd90">PD90</option>
+                            <option value="pd90nb">PD90 N&amp;B</option>
                             <option value="pd120">PD120</option>
+                            <option value="pd120nb">PD120 N&amp;B</option>
                             <option value="pd160">PD160</option>
+                            <option value="pd160nb">PD160 N&amp;B</option>
                             <option value="pd180">PD180</option>
+                            <option value="pd180nb">PD180 N&amp;B</option>
                             <option value="pd240">PD240</option>
+                            <option value="pd240nb">PD240 N&amp;B</option>
                         </optgroup>
                     </select>
             <table id="results" class="results"></table>
@@ -408,18 +425,26 @@
                      syncMs: 20, porchMs: 2.08, scanMs: 244.48 }
     };
     
-    // Sous-modes de chaque famille, dans l'ordre de défilement
-    const FAMILIES = {
+    // Variante N&B de chaque mode : même signal, seule la luminance est
+    // affichée (la chrominance, très sensible au bruit, est ignorée)
+    for (const key of Object.keys(SSTV_MODES)) {
+        SSTV_MODES[key + 'nb'] = Object.assign({}, SSTV_MODES[key], { name: SSTV_MODES[key].name + ' N&B', bw: true });
+    }
+    
+    // Sous-modes de chaque famille, dans l'ordre de défilement : chaque mode
+    // suivi de sa variante N&B
+    const FAMILIES = {};
+    for (const [f, list] of Object.entries({
         robot:   ['robot36', 'robot72'],
         martin:  ['martinM1', 'martinM2'],
         scottie: ['scottieS1', 'scottieS2'],
         pd:      ['pd90', 'pd120', 'pd160', 'pd180', 'pd240']
-    };
+    })) FAMILIES[f] = list.flatMap(k => [k, k + 'nb']);
     
     // VIS code mapping
     const VIS_TO_MODE = {};
     for (const [key, mode] of Object.entries(SSTV_MODES)) {
-        VIS_TO_MODE[mode.visCode] = key;
+        if (!mode.bw) VIS_TO_MODE[mode.visCode] = key;     // un VIS désigne la version couleur
     }
     
     // SSTV frequency constants
@@ -1048,9 +1073,17 @@
         this.rows[n] = r;
     };
     
+    // Gris : luminance Y (échelle studio 16-235) ramenée en pleine échelle
+    function grayFromY(y, out, idx) {
+        const v = Math.max(0, Math.min(255, Math.round((y - 16) * 255 / 219)));
+        out[idx] = out[idx + 1] = out[idx + 2] = v;
+        out[idx + 3] = 255;
+    }
+    
     ImageDecoder.prototype.draw = function (n) {
         const m = this.mode, w = m.width, img = this.image, r = this.rows[n];
         if (!r || this.quiet) return;
+        if (m.bw) { this.drawGray(n); return; }
         switch (m.lineSequence) {
             case 'robot36': {
                 // R-Y et B-Y partagés par le couple de lignes (2p, 2p+1)
@@ -1082,6 +1115,29 @@
                 for (let x = 0; x < w; x++) {
                     const i = (n * w + x) * 4;
                     img[i] = r.R[x]; img[i + 1] = r.G[x]; img[i + 2] = r.B[x];
+                }
+        }
+    };
+    
+    // Variante N&B : Y transmis (Robot, PD) ou luminance BT.601 des voies R, V, B
+    ImageDecoder.prototype.drawGray = function (n) {
+        const m = this.mode, w = m.width, img = this.image, r = this.rows[n];
+        switch (m.lineSequence) {
+            case 'robot36':
+            case 'robot72':
+                for (let x = 0; x < w; x++) grayFromY(r.Y[x], img, (n * w + x) * 4);
+                break;
+            case 'pd':
+                for (let x = 0; x < w; x++) {
+                    grayFromY(r.Y[x], img, (2 * n * w + x) * 4);
+                    grayFromY(r.Y2[x], img, ((2 * n + 1) * w + x) * 4);
+                }
+                break;
+            default:
+                for (let x = 0; x < w; x++) {
+                    const i = (n * w + x) * 4;
+                    img[i] = img[i + 1] = img[i + 2] = Math.round(0.299 * r.R[x] + 0.587 * r.G[x] + 0.114 * r.B[x]);
+                    img[i + 3] = 255;
                 }
         }
     };
@@ -1587,6 +1643,7 @@
     let liveModeName = 'robot36';
     let liveAnchor = 0;           // début de réception : START, effacement ou dernier VIS
     let liveDec = null;           // image en cours de décodage
+    let liveLastDone = null;      // dernière image terminée
     let liveSource = null;
     const liveJournal = [];       // mémoire interne, jamais affichée
     let liveVisFrom = 0;
@@ -1782,26 +1839,32 @@
         prepareLiveCanvas(mode);
         showLiveMode();
         liveDec = null;
+        liveLastDone = null;
         if (!liveTrack) return;
         liveDec = new ImageDecoder(liveTrack, liveModeName, Math.max(liveAnchor, liveTrack.base),
                                    liveDopplerOffset, liveImageData.data);
         // Lecture du tampon sans dessin ; seule la dernière image est dessinée
         liveDec.quiet = true;
-        const done = liveAdvance(liveState !== 'receiving', true);
+        liveAdvance(liveState !== 'receiving', true);
         liveDec.quiet = false;
-        // Image en cours à peine commencée : l'image terminée précédente reste affichée
-        if (done && done !== liveDec && liveDec.n < 8) { done.quiet = false; done.finish(); }
-        if (liveState === 'receiving') liveDec.drawAll();
-        else liveDec.finish();
+        if (liveState === 'receiving' && !liveKeepLast()) liveDec.drawAll();
+        if (liveState !== 'receiving') liveFinalize();
         liveShow();
     }
     
+    // Image en cours sans signal (moins de 8 synchros) après une image
+    // terminée : c'est l'image terminée qui reste affichée
+    function liveKeepLast() {
+        if (!liveLastDone || liveLastDone === liveDec || (liveDec && liveDec.points.length >= 8)) return false;
+        liveLastDone.quiet = false;
+        liveLastDone.finish();
+        return true;
+    }
+    
     // Avance du décodage sur les données reçues ; images enchaînées
-    // Renvoie la dernière image terminée
     function liveAdvance(atEnd, quiet) {
-        let done = null;
         while (liveDec && liveDec.step(atEnd)) {
-            done = liveDec;
+            liveLastDone = liveDec;
             if (!quiet) liveDec.finish();
             if (atEnd && liveDec.expected >= liveTrack.len) break;   // plus de données : image finie gardée
             const locked = liveDec.n - liveDec.lastFound <= 3;
@@ -1811,13 +1874,12 @@
             liveDec = nd;
         }
         if (!quiet) liveShow();
-        return done;
     }
     
     // Fin des données (STOP, ou redécodage après STOP)
     function liveFinalize() {
         liveAdvance(true);
-        if (liveDec) liveDec.finish();
+        if (!liveKeepLast() && liveDec) liveDec.finish();
         liveShow();
     }
     
