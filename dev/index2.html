@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<!--
+================================================================================
+  Nom        : dev/index2.html
+  Objet      : page d'accueil de la version en cours (non approuvée)
+  Auteur     : Eric PERRET
+  Version    : 1.5
+  Date       : 2026-10-18
+  Historique :
+    1.0 (2026-10-18) liens vers les outils en cours
+    1.1 (2026-10-18) diagnostic 2.0
+    1.2 (2026-10-18) diagnostic 2.0 approuvé, retiré de la version en cours
+    1.3 (2026-10-18) émetteur 4.2 et décodeur 1.8 approuvés ; décodeur seul en cours
+    1.4 (2026-10-18) émetteur 4.3 en cours
+    1.5 (2026-10-18) charte graphique AZS, bandeau avec lien vers www.azs.fr
+================================================================================
+-->
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>sstv — version en cours</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+            background: #0d1117;
+            color: #c9d1d9;
+            padding: 40px;
+            max-width: 600px;
+            margin: 0 auto;
+            line-height: 1.6;
+        }
+        h1 { color: #58a6ff; border-bottom: 1px solid #30363d; padding-bottom: 10px; }
+        ul { list-style: none; padding: 0; }
+        li { padding: 12px 0; border-bottom: 1px solid #21262d; }
+        a {
+            color: #58a6ff;
+            text-decoration: none;
+            font-size: 18px;
+        }
+        a:hover { text-decoration: underline; }
+        .footer {
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 1px solid #30363d;
+            font-size: 12px;
+            color: #8b949e;
+        }
+        .footer a { font-size: 12px; }
+            /* ---------- charte AZS (www.azs.fr) ---------- */
+        body { font-family: system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif; background: #0e1418; color: #dfe7ec; padding: 24px 16px; color-scheme: dark; }
+        h1 { color: #dfe7ec; border-bottom: 1px solid #26343e; letter-spacing: -.3px; display: flex; align-items: center; gap: 10px; }
+        h1::before { content: ""; width: 3px; height: 1em; border-radius: 2px; background: #f0a63a; flex: none; }
+        li { border-bottom: 1px solid #26343e; }
+        a { color: #5cc8d6; }
+        a:hover { color: #f0a63a; text-decoration: none; }
+        .footer { border-top: 1px solid #26343e; color: #8fa1ad; font-family: ui-monospace,"SFMono-Regular",Menlo,Consolas,"Liberation Mono",monospace; }
+        .azs-barre{display:flex;align-items:center;gap:12px;padding:8px 14px;margin:0 0 16px;background:#141c22;border:1px solid #26343e;border-radius:8px;
+            font:600 11px/1 ui-monospace,"SFMono-Regular",Menlo,Consolas,"Liberation Mono",monospace;letter-spacing:.06em;text-transform:uppercase;color:#8fa1ad}
+        .azs-barre .azs{font:800 20px/1 ui-monospace,"SFMono-Regular",Menlo,Consolas,"Liberation Mono",monospace;letter-spacing:-1px;text-transform:none;color:#f0a63a;text-decoration:none;padding-right:12px;border-right:1px solid #26343e}
+        .azs-barre .azs:hover{color:#ffcf7a}
+        .azs-barre a.fil{color:#8fa1ad;text-decoration:none}
+        .azs-barre a.fil:hover{color:#f0a63a}
+    </style>
+</head>
+<body>
+    <nav class="azs-barre"><a class="azs" href="https://www.azs.fr/" title="www.azs.fr">AZS</a><a class="fil" href="https://github.com/ericperret/sstv">sstv · dev</a></nav>
+    <h1>sstv — version en cours</h1>
+    <ul>
+        <li><a href="sstv_decoder_ultimate.html">SSTV Decoder Ultimate — décodeur (WAV et audio direct)</a></li>
+        <li><a href="sstv_tx_multimode_v4.html">Émetteur SSTV multi-mode v4 — image vers WAV</a></li>
+    </ul>
+    <div class="footer">
+        <a href="https://github.com/ericperret/sstv">View on GitHub</a>
+        · <a href="../index2.html">Version approuvée</a>
+    </div>
+</body>
+</html>
